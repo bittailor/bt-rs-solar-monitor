@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "preLaunchTask": "rust: cargo build debug",
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "probe_rs Executable Test",
+            "chip": "RP235x",
+            "flashingConfig": {
+                "flashingEnabled": true,
+                "haltAfterReset": true,
+            },
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "${workspaceFolder}/target/thumbv8m.main-none-eabihf/debug/uart_buffered_split",
+                    "svdFile": "${userHome}/.pico-sdk/sdk/2.0.0/src/rp2350/hardware_regs/RP2350.svd",
+                    "rttEnabled": true,
+                }
+            ],
+            "consoleLogLevel": "Info", //Error, Warn, Info, Debug, Trace
+            "wireProtocol": "Swd"
+        }
+    ]
+}

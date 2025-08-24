@@ -1,0 +1,7 @@
+task :publish do
+    folders = ['app', 'public', 'vendor'] 
+    folders.each do |folder|
+        puts "Syncing #{folder} ..."
+        sh "rsync -avzh --delete ./#{folder}/ bockli@bockmattli.ch:/home/bockli/staging/solar-api/#{folder}"
+    end
+end
