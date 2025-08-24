@@ -1,24 +1,17 @@
 #![no_std]
 #![no_main]
 
-use core::str::from_utf8;
-
-use bt_solar_monitor::net::lte;
-use bt_solar_monitor::net::lte::at_cmds::AtError;
+use atat::asynch::AtatClient;
+use atat::digest::ParseError;
+use atat::{AtatIngress, DefaultDigester, Ingress, ResponseSlot, UrcChannel, asynch::Client};
+use bt_solar_monitor::net::lte::at::{Urc, http, network, packet_domain};
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_net::dns::DnsSocket;
-use embassy_net::tcp::client::{TcpClient, TcpClientState};
-use embassy_net::{Stack, StackResources};
 use embassy_rp::bind_interrupts;
-use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::UART0;
 use embassy_rp::uart::{self, BufferedInterruptHandler, BufferedUart};
-use embassy_time::{Duration, Timer, WithTimeout as _};
-use heapless::Vec;
-use reqwless::client::{HttpClient, TlsConfig, TlsVerify};
-use reqwless::request::Method;
+use embassy_time::Timer;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -26,49 +19,39 @@ bind_interrupts!(struct Irqs {
     UART0_IRQ => BufferedInterruptHandler<UART0>;
 });
 
+const INGRESS_BUF_SIZE: usize = 1024;
+const URC_CAPACITY: usize = 128;
+const URC_SUBSCRIBERS: usize = 3;
+
 #[embassy_executor::task]
-async fn net_task(mut runner: embassy_net::Runner<'static, embassy_net_ppp::Device<'static>>) -> ! {
-    info!("net_task A");
-    runner.run().await
+async fn ingress_task(
+    mut ingress: Ingress<
+        'static,
+        LoggingDigester<DefaultDigester<Urc>>,
+        Urc,
+        INGRESS_BUF_SIZE,
+        URC_CAPACITY,
+        URC_SUBSCRIBERS,
+    >,
+    mut reader: uart::BufferedUartRx,
+) -> ! {
+    ingress.read_from(&mut reader).await
 }
 
-#[embassy_executor::task]
-async fn ppp_task(
-    stack: Stack<'static>,
-    mut runner: embassy_net_ppp::Runner<'static>,
-    uart: BufferedUart,
-) {
-    //let port = Async::new(port).unwrap();
-    //let port = BufReader::new(port);
-    //let port = embedded_io_adapters::futures_03::FromFutures::new(port);
+struct LoggingDigester<D: atat::Digester> {
+    inner: D,
+}
 
-    info!("ppp_task A");
+impl<D: atat::Digester> atat::Digester for LoggingDigester<D> {
+    fn digest<'a>(&mut self, buf: &'a [u8]) -> (atat::DigestResult<'a>, usize) {
+        debug!("digest> {=[u8]:a}", buf);
+        self.inner.digest(buf)
+    }
+}
 
-    let config = embassy_net_ppp::Config {
-        username: b"myuser",
-        password: b"mypass",
-    };
-
-    info!("ppp_task B");
-    runner
-        .run(uart, config, |ipv4| {
-            let Some(addr) = ipv4.address else {
-                warn!("PPP did not provide an IP address.");
-                return;
-            };
-            let mut dns_servers = Vec::new();
-            for s in ipv4.dns_servers.iter().flatten() {
-                let _ = dns_servers.push(*s);
-            }
-            let config = embassy_net::ConfigV4::Static(embassy_net::StaticConfigV4 {
-                address: embassy_net::Ipv4Cidr::new(addr, 0),
-                gateway: None,
-                dns_servers,
-            });
-            stack.set_config_v4(config);
-        })
-        .await
-        .unwrap();
+pub fn success_response(resp: &[u8]) -> Result<(&[u8], usize), ParseError> {
+    debug!("custom_success> {=[u8]:a}", resp);
+    Err(ParseError::NoMatch)
 }
 
 #[embassy_executor::main]
@@ -78,15 +61,13 @@ async fn main(spawner: Spawner) {
     let mut reset = Output::new(p.PIN_16, Level::High);
     let mut _pwrkey = Output::new(p.PIN_17, Level::High);
 
-    let mut rng = RoscRng;
-
     let (tx_pin, rx_pin, uart) = (p.PIN_0, p.PIN_1, p.UART0);
 
     static TX_BUF: StaticCell<[u8; 1024]> = StaticCell::new();
     let tx_buf = &mut TX_BUF.init([0; 1024])[..];
     static RX_BUF: StaticCell<[u8; 1024]> = StaticCell::new();
     let rx_buf = &mut RX_BUF.init([0; 1024])[..];
-    let mut uart: BufferedUart = BufferedUart::new(
+    let uart: BufferedUart = BufferedUart::new(
         uart,
         tx_pin,
         rx_pin,
@@ -95,69 +76,77 @@ async fn main(spawner: Spawner) {
         rx_buf,
         uart::Config::default(),
     );
+    let (writer, reader) = uart.split();
 
-    // Init network device
-    static STATE: StaticCell<embassy_net_ppp::State<4, 4>> = StaticCell::new();
-    let state = STATE.init(embassy_net_ppp::State::<4, 4>::new());
-    let (device, ppp_runner) = embassy_net_ppp::new(state);
-
-    // Generate random seed
-    let seed = rng.next_u64();
-
-    // Init network stack
-    static RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
-    let (stack, net_runner) = embassy_net::new(
-        device,
-        embassy_net::Config::default(), // don't configure IP yet
-        RESOURCES.init(StackResources::new()),
-        seed,
+    static INGRESS_BUF: StaticCell<[u8; INGRESS_BUF_SIZE]> = StaticCell::new();
+    static RES_SLOT: ResponseSlot<INGRESS_BUF_SIZE> = ResponseSlot::new();
+    static URC_CHANNEL: UrcChannel<Urc, URC_CAPACITY, URC_SUBSCRIBERS> = UrcChannel::new();
+    let ingress = Ingress::new(
+        LoggingDigester {
+            inner: DefaultDigester::<Urc>::default().with_custom_success(success_response),
+        },
+        INGRESS_BUF.init([0; INGRESS_BUF_SIZE]),
+        &RES_SLOT,
+        &URC_CHANNEL,
+    );
+    static BUF: StaticCell<[u8; 1024]> = StaticCell::new();
+    let mut client = Client::new(
+        writer,
+        &RES_SLOT,
+        BUF.init([0; 1024]),
+        atat::Config::default(),
     );
 
-    info!("... reset ...");
+    spawner.spawn(ingress_task(ingress, reader)).unwrap();
+
+    info!("reset ...");
     reset.set_low();
     Timer::after_millis(2500).await;
     reset.set_high();
-    _ = startup_lte(&mut uart).await;
+    info!("... wait a bit for module to start ...");
+    Timer::after_millis(2000).await;
+    info!("... reset done");
 
-    // Launch network task
-    info!("spawn net_task");
-    spawner.spawn(net_task(net_runner)).unwrap();
-    info!("spawn ppp_task");
-    spawner.spawn(ppp_task(stack, ppp_runner, uart)).unwrap();
-
-    info!("... stack stack.wait_config_up ...");
-    stack.wait_config_up().await;
-    info!("... stack up ...");
-
-    for _ in 1..5 {
-        match stack
-            .dns_query(
-                "playground.bockmattli.ch",
-                embassy_net::dns::DnsQueryType::A,
-            )
-            .await
-        {
-            Ok(ip) => info!("Resolved IP address: {}", ip),
-            Err(e) => warn!("DNS query failed: {}", e),
-        };
+    info!("startup ...");
+    while client
+        .send(&bt_solar_monitor::net::lte::at::AT)
+        .await
+        .is_err()
+    {
+        Timer::after_millis(100).await;
+        info!("... retrying");
     }
 
-    info!("... request ...");
-    requests(stack, seed).await;
-    info!("... done ...");
-
-    /*
-    let mut rx_buf = [0; 4096];
-    let response = client
-        .request(Method::POST, &url)
-        .await
-        .unwrap()
-        .body(b"PING")
-        .content_type(ContentType::TextPlain)
-        .send(&mut rx_buf)
+    client
+        .send(&packet_domain::SetPDPContextDefinition {
+            cid: packet_domain::ContextId(1),
+            pdp_type: "IP",
+            apn: "gprs.swisscom.ch",
+        })
         .await
         .unwrap();
-    */
+
+    info!("network registration ...");
+    while !client
+        .send(&network::GetNetworkRegistrationStatus)
+        .await
+        .is_ok_and(|resp| {
+            info!("NetworkRegistrationStatus: {:?}", resp);
+            resp.stat == network::NetworkRegistrationStat::Registered
+        })
+    {
+        Timer::after_millis(100).await;
+        info!("... retrying");
+    }
+
+    info!("... network registration done");
+
+    info!("requests ...");
+
+    match requests(&mut client, &URC_CHANNEL).await {
+        Ok(_) => info!("... requests done"),
+        Err(e) => warn!("... requests failed with {}", e),
+    };
 
     loop {
         led.set_high();
@@ -167,130 +156,54 @@ async fn main(spawner: Spawner) {
     }
 }
 
-pub async fn startup_lte(uart: &mut BufferedUart) -> Result<(), AtError> {
-    info!("... flush ...");
-    let flush = async {
-        loop {
-            match lte::at_cmds::read_response(uart).await {
-                Ok(line) => info!("uart> {}", line),
-                Err(e) => warn!("uart error> {}", e),
-            }
-        }
-    };
-    _ = flush.with_timeout(Duration::from_millis(5000)).await;
-    info!("... flush done ...");
+async fn requests(
+    client: &mut Client<'_, uart::BufferedUartTx, INGRESS_BUF_SIZE>,
+    urc_channel: &UrcChannel<Urc, URC_CAPACITY, URC_SUBSCRIBERS>,
+) -> Result<(), atat::Error> {
+    let mut subscribtion = urc_channel.subscribe().unwrap();
 
-    info!("... startup ...");
-
-    let mut client = lte::at_cmds::AtClient::new(uart);
-
-    client.send_command("AT").await?;
-    client.send_command("AT").await?;
-    //client.send_command("ATE0").await?;
-
-    client.send_request("AT+CSQ").await?;
+    client.send(&http::StartHttpService).await?;
 
     client
-        .send_command("AT+CGDCONT=1,\"IP\",\"gprs.swisscom.ch\"")
+        .send(&http::SetHttpParameter {
+            parameter: http::HttpParameter::Url("http://api.solar.bockmattli.ch/api/v1/solar"),
+        })
         .await?;
 
-    info!("... wait for roaming lte connection to be established ...");
-    loop {
-        let response = client.send_request("AT+CEREG?").await?;
-        if response == "+CEREG: 0,1" {
-            break;
+    client
+        .send(&http::HttpAction {
+            method: http::HttpMethod::Get,
+        })
+        .await?;
+
+    let next = subscribtion.next_message_pure().await;
+
+    let response = match next {
+        Urc::DummyIndication(_) => {
+            info!("DummyIndication");
+            return Ok(());
         }
-        Timer::after_millis(250).await;
-    }
-    info!("... roaming lte connection established ...");
-
-    //client.send_command("AT+CSSLCFG=\"authmode\",0,0").await?;
-    //client.send_command("AT+CSSLCFG=\"enableSNI\",0,1").await?;
-
-    /*     let fast_baudrate = 460800;
-    client.send_command("AT+IPR=460800").await?;
-    client.rw.set_baudrate(fast_baudrate);
-    client.rw.flush().await?;
-
-    Timer::after_millis(1000).await;
-    */
-
-    client.send_command("ATD*99#").await?;
-
-    /*
-    client.send_line("ATD*99#").await?;
-
-    info!("... flush ...");
-    let flush = async {
-        loop {
-            match lte::at_cmds::read_response(uart).await {
-                Ok(line) => info!("uart> {}", line),
-                Err(e) => warn!("uart error> {}", e),
-            }
+        Urc::HttpActionResponseIndication(http_action_response) => {
+            info!("HttpActionResponseIndication: {:?}", http_action_response);
+            http_action_response
         }
     };
-    _ = flush.with_timeout(Duration::from_millis(5000)).await;
-    info!("... flush done ...");
-    */
 
-    Ok(())
-}
-
-async fn requests(stack: Stack<'_>, seed: u64) {
-    let mut tls_read_buffer = [0; 16640];
-    let mut tls_write_buffer = [0; 16640];
-
-    let client_state = TcpClientState::<1, 1024, 1024>::new();
-    let tcp_client = TcpClient::new(stack, &client_state);
-    let dns_client = DnsSocket::new(stack);
-    let tls_config = TlsConfig::new(
-        seed,
-        &mut tls_read_buffer,
-        &mut tls_write_buffer,
-        TlsVerify::None,
+    info!(
+        "Request status={} length={}",
+        response.status_code, response.data_length
     );
 
-    //let url = format!("http://localhost", addr.port());
-    let mut http_client = HttpClient::new_with_tls(&tcp_client, &dns_client, tls_config); // Types implementing embedded-nal-async
+    let data_length = client.send(&http::QueryHttpRead {}).await?.data_length;
 
-    request(
-        "http://api.solar.bockmattli.ch/api/v1/solar",
-        &mut http_client,
-    )
-    .await;
-    request(
-        "http://api.solar.bockmattli.ch/api/v1/lte",
-        &mut http_client,
-    )
-    .await;
-}
+    info!("data_length {}", data_length);
 
-async fn request(url: &str, http_client: &mut HttpClient<'_, TcpClient<'_, 1>, DnsSocket<'_>>) {
-    let mut rx_buffer = [0; 8192];
-    info!("HTTP GET -> {}", &url);
-    {
-        let mut request = match http_client.request(Method::GET, &url).await {
-            Ok(req) => req,
-            Err(e) => {
-                error!("Failed to make HTTP request: {:?}", e);
-                return; // handle the error
-            }
-        };
+    client
+        .send(&http::HttpRead {
+            offset: 0,
+            lenght: response.data_length,
+        })
+        .await?;
 
-        let response = match request.send(&mut rx_buffer).await {
-            Ok(resp) => resp,
-            Err(e) => {
-                error!("Failed to send HTTP request {:?}", e);
-                return; // handle the error;
-            }
-        };
-        let body = match from_utf8(response.body().read_to_end().await.unwrap()) {
-            Ok(b) => b,
-            Err(_e) => {
-                error!("Failed to read response body");
-                return; // handle the error
-            }
-        };
-        info!("Response body: {:?}", &body);
-    }
+    Ok(())
 }

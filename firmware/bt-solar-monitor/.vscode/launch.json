@@ -14,7 +14,7 @@
             "coreConfigs": [
                 {
                     "coreIndex": 0,
-                    "programBinary": "${workspaceFolder}/target/thumbv8m.main-none-eabihf/debug/uart_buffered_split",
+                    "programBinary": "${workspaceFolder}/target/thumbv8m.main-none-eabihf/debug/lte",
                     "svdFile": "${userHome}/.pico-sdk/sdk/2.0.0/src/rp2350/hardware_regs/RP2350.svd",
                     "rttEnabled": true,
                 }
