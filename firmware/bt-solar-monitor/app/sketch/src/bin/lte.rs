@@ -4,7 +4,7 @@
 use atat::asynch::AtatClient;
 use atat::digest::ParseError;
 use atat::{AtatIngress, DefaultDigester, Ingress, ResponseSlot, UrcChannel, asynch::Client};
-use bt_solar_monitor::net::lte::at::{Urc, http, network, packet_domain};
+use bt_core::lte::at::{Urc, http, network, packet_domain};
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
@@ -108,11 +108,7 @@ async fn main(spawner: Spawner) {
     info!("... reset done");
 
     info!("startup ...");
-    while client
-        .send(&bt_solar_monitor::net::lte::at::AT)
-        .await
-        .is_err()
-    {
+    while client.send(&bt_core::lte::at::AT).await.is_err() {
         Timer::after_millis(100).await;
         info!("... retrying");
     }
@@ -186,6 +182,10 @@ async fn requests(
         Urc::HttpActionResponseIndication(http_action_response) => {
             info!("HttpActionResponseIndication: {:?}", http_action_response);
             http_action_response
+        }
+        _ => {
+            warn!("unexpected urc");
+            return Ok(());
         }
     };
 

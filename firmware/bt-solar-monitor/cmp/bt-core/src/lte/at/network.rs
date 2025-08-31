@@ -1,6 +1,5 @@
 use atat::atat_derive::{AtatCmd, AtatResp};
 use atat_derive::AtatEnum;
-use defmt::Format;
 use heapless::String;
 
 #[derive(Clone, AtatCmd)]
@@ -16,7 +15,8 @@ pub struct SetNetworkRegistrationStatus {
 
 // --- types
 
-#[derive(Clone, AtatResp, Format)]
+#[derive(Clone, AtatResp)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct NetworkRegistrationStatus {
     #[at_arg(position = 0)]
     pub n: NetworkRegistrationUrcConfig,
@@ -28,7 +28,8 @@ pub struct NetworkRegistrationStatus {
     pub ci: Option<String<8>>,
 }
 
-#[derive(Clone, PartialEq, Eq, AtatEnum, Format)]
+#[derive(Clone, PartialEq, Eq, AtatEnum)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum NetworkRegistrationUrcConfig {
     /// 0 disable network registration unsolicited result code
     UrcDisabled = 0,
@@ -38,7 +39,8 @@ pub enum NetworkRegistrationUrcConfig {
     UrcVerbose = 2,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, AtatEnum, Format)]
+#[derive(Debug, Clone, PartialEq, Eq, AtatEnum)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum NetworkRegistrationStat {
     /// not registered, the MT is not currently searching a new operator to register to
     NotRegistered = 0,

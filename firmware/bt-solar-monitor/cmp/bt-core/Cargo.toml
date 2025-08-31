@@ -1,0 +1,22 @@
+[package]
+name = "bt-core"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+defmt = ["dep:defmt"]
+log = ["dep:log"]
+
+[dependencies]
+defmt = { version = "1.0.1", optional = true }
+log = { version = "0.4.27", optional = true }
+
+heapless = "0.8.0"
+
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+
+atat = { version = "0.24.1" , features = ["defmt"] }
+atat_derive = { version = "0.24.1" }
+
+[dev-dependencies]
+defmt-rtt = "1.0.0"

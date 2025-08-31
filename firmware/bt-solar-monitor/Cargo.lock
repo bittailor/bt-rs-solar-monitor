@@ -150,27 +150,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "bt-solar-monitor"
+name = "bt-core"
 version = "0.1.0"
 dependencies = [
  "atat",
  "atat_derive",
- "cortex-m",
- "cortex-m-rt",
  "defmt 1.0.1",
  "defmt-rtt",
- "embassy-executor",
- "embassy-futures",
- "embassy-rp",
- "embassy-sync 0.7.1",
- "embassy-time",
- "embassy-usb",
- "embedded-hal-async",
- "embedded-io-async",
  "heapless",
- "panic-probe",
+ "log",
  "serde",
- "static_cell",
 ]
 
 [[package]]
@@ -1382,6 +1371,31 @@ name = "siphasher"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
+
+[[package]]
+name = "sketch"
+version = "0.1.0"
+dependencies = [
+ "atat",
+ "atat_derive",
+ "bt-core",
+ "cortex-m",
+ "cortex-m-rt",
+ "defmt 1.0.1",
+ "defmt-rtt",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-rp",
+ "embassy-sync 0.7.1",
+ "embassy-time",
+ "embassy-usb",
+ "embedded-hal-async",
+ "embedded-io-async",
+ "heapless",
+ "panic-probe",
+ "serde",
+ "static_cell",
+]
 
 [[package]]
 name = "smallvec"

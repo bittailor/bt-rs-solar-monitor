@@ -1,12 +1,11 @@
 use atat_derive::{AtatCmd, AtatEnum, AtatResp};
-use defmt::Format;
-use heapless::String;
 
 #[derive(Clone, AtatCmd)]
 #[at_cmd("+HTTPINIT", super::NoResponse)]
 pub struct StartHttpService;
 
-#[derive(Clone, Format)]
+#[derive(Clone)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct SetHttpParameter<'a> {
     pub parameter: HttpParameter<'a>,
 }
@@ -27,23 +26,6 @@ pub struct QueryHttpReadResponse {
     pub data_length: u32,
 }
 
-fn parse_query_http_read_response(line: &[u8]) -> Result<QueryHttpReadResponse, atat::Error> {
-    defmt::debug!("parse_query_http_read_response {=[u8]:a}", line);
-    let parts = line.split(|b| *b == b',');
-    match parts.last() {
-        Some(length) => {
-            let length = str::from_utf8(length)
-                .map_err(|_| atat::Error::Parse)?
-                .parse::<u32>()
-                .map_err(|_| atat::Error::Parse)?;
-            Ok(QueryHttpReadResponse {
-                data_length: length,
-            })
-        }
-        None => Err(atat::Error::Parse),
-    }
-}
-
 #[derive(Clone, AtatCmd)]
 #[at_cmd("+HTTPREAD", super::NoResponse)] // URC 
 pub struct HttpRead {
@@ -53,7 +35,8 @@ pub struct HttpRead {
     pub lenght: u32,
 }
 
-#[derive(Clone, AtatResp, Format)]
+#[derive(Clone, AtatResp)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct HttpActionResponse {
     #[at_arg(position = 0)]
     pub method: HttpMethod,
@@ -63,13 +46,22 @@ pub struct HttpActionResponse {
     pub data_length: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Format)]
+#[derive(Clone, AtatResp)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct HttpReadData {
+    #[at_arg(position = 0)]
+    pub data: heapless::Vec<u8, 512>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum HttpParameter<'a> {
     Url(&'a str),
     ContentType(&'a str),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, AtatEnum, Format)]
+#[derive(Debug, Clone, PartialEq, Eq, AtatEnum)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum HttpMethod {
     Get = 0,
     Post = 1,
@@ -149,5 +141,71 @@ impl<'a> atat::serde_at::serde::Serialize for SetHttpParameter<'a> {
             }
         }
         atat::serde_at::serde::ser::SerializeStruct::end(serde_state)
+    }
+}
+
+fn parse_query_http_read_response(line: &[u8]) -> Result<QueryHttpReadResponse, atat::Error> {
+    debug!("parse_query_http_read_response {=[u8]:a}", line);
+    let parts = line.split(|b| *b == b',');
+    match parts.last() {
+        Some(length) => {
+            let length = str::from_utf8(length)
+                .map_err(|_| atat::Error::Parse)?
+                .parse::<u32>()
+                .map_err(|_| atat::Error::Parse)?;
+            Ok(QueryHttpReadResponse {
+                data_length: length,
+            })
+        }
+        None => Err(atat::Error::Parse),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use atat::AtatCmd;
+
+    const CMD_BUFFER_SIZE: usize = 1024;
+
+    fn write_to_string<Cmd: AtatCmd>(cmd: &Cmd) -> String {
+        let mut buf = [0u8; CMD_BUFFER_SIZE];
+        let len = cmd.write(&mut buf);
+        core::str::from_utf8(&buf[..len]).unwrap().into()
+    }
+
+    fn get_resp(line: &str) -> Result<&[u8], atat::InternalError> {
+        Ok(line.as_bytes())
+    }
+
+    #[test]
+    fn cmd_set_http_parameter_url() {
+        let cmd = SetHttpParameter {
+            parameter: HttpParameter::Url("http://api.solar.bockmattli.ch/api/v1/solar"),
+        };
+        assert_eq!(
+            write_to_string(&cmd),
+            "AT+HTTPPARA=\"URL\",\"http://api.solar.bockmattli.ch/api/v1/solar\"\r"
+        );
+    }
+
+    #[test]
+    fn cmd_set_http_parameter_content_type() {
+        let cmd = SetHttpParameter {
+            parameter: HttpParameter::ContentType("text/plain"),
+        };
+        assert_eq!(
+            write_to_string(&cmd),
+            "AT+HTTPPARA=\"CONTENT\",\"text/plain\"\r"
+        );
+    }
+
+    #[test]
+    fn resp_query_http_read() {
+        let cmd = QueryHttpRead {};
+        let response = cmd
+            .parse(get_resp("+HTTPREAD: LEN,93"))
+            .expect("Failed to parse response");
+        assert_eq!(response.data_length, 93);
     }
 }

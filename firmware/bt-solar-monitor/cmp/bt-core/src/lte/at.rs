@@ -21,6 +21,8 @@ pub enum Urc {
     // NetworkRegistrationStatusIndication(network::NetworkRegistrationStatus),
     #[at_urc("+HTTPACTION")]
     HttpActionResponseIndication(http::HttpActionResponse),
+    //#[at_urc("+HTTPREAD: ")]
+    //HttpReadDataIndication(http::HttpReadData),
 }
 
 #[derive(Clone, AtatResp)]

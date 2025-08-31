@@ -1,9 +1,9 @@
 use atat::atat_derive::AtatCmd;
 use atat_derive::AtatLen;
-use defmt::Format;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, AtatLen, Format)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, AtatLen)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ContextId(pub u8);
 
 #[derive(Clone, AtatCmd)]
