@@ -268,3 +268,11 @@ impl<'a> defmt::Format for Bytes<'a> {
         defmt::write!(fmt, "{:02x}", self.0)
     }
 }
+
+/*
+#[cfg(feature = "defmt")]
+type FormatRequirement = defmt::Format;
+
+#[cfg(not(feature = "defmt"))]
+pub trait FormatRequirement {}
+*/

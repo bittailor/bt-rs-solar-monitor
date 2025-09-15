@@ -64,6 +64,11 @@ async fn main(_spawner: Spawner) {
         }
         lte.set_apn("gprs.swisscom.ch").await?;
 
+        while lte.read_network_registration().await?.1 != bt_core::lte::at::NetworkRegistrationState::Registered {
+            warn!("Not registered to network yet, waiting...");
+            Timer::after_secs(2).await;
+        }
+
         Ok::<(), LteError>(())
     };
 
