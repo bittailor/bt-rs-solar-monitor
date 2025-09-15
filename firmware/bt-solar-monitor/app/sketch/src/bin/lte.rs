@@ -1,15 +1,14 @@
 #![no_std]
 #![no_main]
 
+use bt_core::lte::LteError;
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_futures::join::join3;
+use embassy_futures::join::*;
 use embassy_rp::bind_interrupts;
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::UART0;
 use embassy_rp::uart::{self, BufferedInterruptHandler, BufferedUart};
-use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
-use embassy_sync::channel::Channel;
 use embassy_time::Timer;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
@@ -32,11 +31,14 @@ async fn main(_spawner: Spawner) {
     static RX_BUF: StaticCell<[u8; 1024]> = StaticCell::new();
     let rx_buf = &mut RX_BUF.init([0; 1024])[..];
     let uart: BufferedUart = BufferedUart::new(uart, tx_pin, rx_pin, Irqs, tx_buf, rx_buf, uart::Config::default());
-    //let (_writer, _reader) = uart.split();
 
-    let channel = Channel::<ThreadModeRawMutex, bt_core::lte::Command, 32>::new();
+    let mut lte_state = bt_core::lte::State::new();
+    let (lte, lte_runner) = bt_core::lte::new_lte(&mut lte_state, uart).await;
+
+    /*
     let lte: bt_core::lte::Runner<_, ThreadModeRawMutex, 32> = bt_core::lte::Runner::new(uart, channel.receiver());
     let sender = channel.sender();
+    */
 
     let blinky = async {
         loop {
@@ -48,8 +50,6 @@ async fn main(_spawner: Spawner) {
         }
     };
     let commands = async {
-        let sender = sender;
-
         info!("reset ...");
         reset.set_low();
         Timer::after_millis(2500).await;
@@ -58,10 +58,15 @@ async fn main(_spawner: Spawner) {
         Timer::after_millis(5000).await;
         info!("... reset done");
 
-        sender.send(bt_core::lte::Command::cmd("AT")).await;
-        sender.send(bt_core::lte::Command::cmd("AT")).await;
-        //sender.send(bt_core::lte::Command::cmd("AT+CGDCONT=1,\"IP\",\"gprs.swisscom.ch\"")).await;
+        while lte.at().await.is_err() {
+            error!("LTE module not responding to AT command, retrying...");
+            Timer::after_secs(2).await;
+        }
+        lte.set_apn("gprs.swisscom.ch").await?;
+
+        Ok::<(), LteError>(())
     };
 
-    join3(blinky, lte.run(), commands).await;
+    join3(blinky, lte_runner.run(), commands).await;
+    //join(blinky, commands).await;
 }
