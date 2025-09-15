@@ -20,6 +20,7 @@ embassy-time = { version = "0.5.0", features = [
     "defmt-timestamp-uptime",
 ] }
 
+nom = { version = "8.0.0", features = [], default-features = false }
 
 [dev-dependencies]
 defmt-rtt = "1.0.0"

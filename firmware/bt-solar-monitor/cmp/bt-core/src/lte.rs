@@ -20,14 +20,14 @@ const AT_BUFFER_SIZE: usize = 256;
 const MAX_RESPONSE_LINES: usize = 8;
 
 pub struct State {
-    tx_channel: Channel<NoopRawMutex, AtCommandMessage, CHANNEL_SIZE>,
+    tx_channel: Channel<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
     rx_channel: Channel<NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
-            tx_channel: Channel::<NoopRawMutex, AtCommandMessage, CHANNEL_SIZE>::new(),
+            tx_channel: Channel::<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>::new(),
             rx_channel: Channel::<NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>::new(),
         }
     }
@@ -51,6 +51,15 @@ pub enum LteError {
     Error,
 }
 
+impl From<AtError> for LteError {
+    fn from(err: AtError) -> Self {
+        match err {
+            AtError::Timeout => LteError::Timeout,
+            AtError::Error => LteError::Error,
+        }
+    }
+}
+
 impl From<core::fmt::Error> for LteError {
     fn from(_err: core::fmt::Error) -> Self {
         LteError::Error
@@ -58,51 +67,60 @@ impl From<core::fmt::Error> for LteError {
 }
 
 pub struct Lte<'ch> {
-    tx: Sender<'ch, NoopRawMutex, AtCommandMessage, CHANNEL_SIZE>,
+    tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
     rx: Receiver<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
 }
 
 impl Lte<'_> {
     pub async fn at(&self) -> Result<(), LteError> {
         self.tx.send(cmd("AT").with_timeout(Duration::from_millis(200))).await;
+        _ = self.rx.receive().await?;
+        Ok(())
+        /*
         match self.rx.receive().await {
             AtResponseMessage::Timeout => Err(LteError::Timeout),
             AtResponseMessage::Error => Err(LteError::Error),
             AtResponseMessage::Ok(_) => Ok(()),
         }
+        */
     }
 
     pub async fn set_apn(&self, apn: &str) -> Result<(), LteError> {
         self.tx.send(fmt(format!("AT+CGDCONT=1,\"IP\",\"{}\"", apn)?)).await;
-        match self.rx.receive().await {
-            AtResponseMessage::Timeout => Err(LteError::Timeout),
-            AtResponseMessage::Error => Err(LteError::Error),
-            AtResponseMessage::Ok(_) => Ok(()),
-        }
+        _ = self.rx.receive().await?;
+        Ok(())
+    }
+
+    pub async fn read_network_registration(&self) -> Result<(at::NetworkRegistrationUrcConfig, at::NetworkRegistrationState), LteError> {
+        self.tx.send(cmd("AT+CREG?")).await;
+        let response = self.rx.receive().await?;
+        
+
+        todo!()
     }
 }
 
-pub struct AtCommandMessage {
+pub struct AtRequestMessage {
     command: String<AT_BUFFER_SIZE>,
     timeout: Duration,
 }
 
-impl AtCommandMessage {
+impl AtRequestMessage {
     fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 }
 
-fn cmd(command: &str) -> AtCommandMessage {
+fn cmd(command: &str) -> AtRequestMessage {
     match String::from_str(command) {
-        Ok(command) => AtCommandMessage {
+        Ok(command) => AtRequestMessage {
             command,
             timeout: Duration::from_secs(1),
         },
         Err(_) => {
             error!("Command too long: {}", command);
-            AtCommandMessage {
+            AtRequestMessage {
                 command: String::new(),
                 timeout: Duration::from_secs(5),
             }
@@ -110,24 +128,25 @@ fn cmd(command: &str) -> AtCommandMessage {
     }
 }
 
-fn fmt(command: String<AT_BUFFER_SIZE>) -> AtCommandMessage {
-    AtCommandMessage {
+fn fmt(command: String<AT_BUFFER_SIZE>) -> AtRequestMessage {
+    AtRequestMessage {
         command,
         timeout: Duration::from_secs(1),
     }
 }
 
-pub enum AtResponseMessage {
+pub enum AtError {
     Timeout,
     Error,
-    Ok(Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>),
 }
+
+type AtResponseMessage = Result<Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>, AtError>;
 
 pub struct Runner<'ch, S: Read + Write>
 where
     <S as ErrorType>::Error: Format,
 {
-    receiver: Receiver<'ch, NoopRawMutex, AtCommandMessage, CHANNEL_SIZE>,
+    receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
     sender: Sender<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
     at_controller: AtController<S>,
 }
@@ -138,7 +157,7 @@ where
 {
     pub fn new(
         stream: S,
-        receiver: Receiver<'ch, NoopRawMutex, AtCommandMessage, CHANNEL_SIZE>,
+        receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
         sender: Sender<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
     ) -> Self {
         Self {
@@ -161,16 +180,16 @@ where
         }
     }
 
-    async fn send_command(&mut self, command: AtCommandMessage) -> AtResponseMessage {
+    async fn send_command(&mut self, command: AtRequestMessage) -> AtResponseMessage {
         debug!("Try sent command: {}", command.command);
         if let Err(_e) = self.at_controller.stream.write_all(command.command.as_bytes()).await {
             error!("Failed to send command: {}", command.command);
-            return AtResponseMessage::Error;
+            return Err(AtError::Error);
         }
 
         if let Err(_e) = self.at_controller.stream.write_all(b"\r\n").await {
             error!("Failed to send command: {}", command.command);
-            return AtResponseMessage::Error;
+            return Err(AtError::Error);
         }
         info!("Command sent: {}", command.command);
 
@@ -182,10 +201,10 @@ where
                 let line = self.at_controller.read_line().await;
                 if line == "OK" {
                     info!("Command success with {} lines", counter);
-                    break AtResponseMessage::Ok(lines);
+                    break Ok(lines);
                 } else if line == "ERROR" {
                     error!("Command error with {} lines", counter);
-                    break AtResponseMessage::Error;
+                    break Err(AtError::Error);
                 } else {
                     info!(">{}> {}", counter, line.as_str());
                     if lines.len() == 0 && line == command.command {
@@ -196,7 +215,7 @@ where
                         Ok(_) => {}
                         Err(_) => {
                             error!("Response buffer full");
-                            break AtResponseMessage::Error;
+                            break Err(AtError::Error);
                         }
                     }
                     counter += 1;
@@ -211,7 +230,7 @@ where
             }
             Err(_e) => {
                 error!("Command '{}' timeout", command.command);
-                AtResponseMessage::Timeout
+                Err(AtError::Timeout)
             }
         }
     }
