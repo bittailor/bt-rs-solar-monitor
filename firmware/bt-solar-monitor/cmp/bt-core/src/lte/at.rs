@@ -187,6 +187,8 @@ pub async fn set_apn(ctr: &AtClient<'_>, apn: &str) -> Result<(), AtError> {
     Ok(())
 }
 
+// ----
+
 // +CREG: <n>,<stat>[,<lac>,<ci>]
 // +CREG: 0,1
 pub async fn get_network_registration(ctr: &AtClient<'_>) -> Result<(NetworkRegistrationUrcConfig, NetworkRegistrationState), AtError> {
@@ -197,9 +199,28 @@ pub async fn get_network_registration(ctr: &AtClient<'_>) -> Result<(NetworkRegi
             actual: response.len(),
         });
     }
-    let (_, (_, n, _, stat)) = (tag("+CREG: "), number, sperator, number).parse(&response[0])?;
+    parse_network_registration_response(&response[0])
+}
+fn parse_network_registration_response(input: &str) -> Result<(NetworkRegistrationUrcConfig, NetworkRegistrationState), AtError> {
+    let (_, (_, n, _, stat)) = (tag("+CREG: "), number, sperator, number).parse(input)?;
     Ok((n.try_into()?, stat.try_into()?))
 }
+#[test]
+fn test_network_registration() {
+    let (n, stat) = parse_network_registration_response("+CREG: 0,1").unwrap();
+    assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
+    assert_eq!(stat, NetworkRegistrationState::Registered);
+
+    let (n, stat) = parse_network_registration_response("+CREG: 0,0").unwrap();
+    assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
+    assert_eq!(stat, NetworkRegistrationState::NotRegistered);
+
+    let (n, stat) = parse_network_registration_response("+CREG: 0,11").unwrap();
+    assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
+    assert_eq!(stat, NetworkRegistrationState::NotRegisteredSearching);
+}
+
+// ----
 
 pub async fn set_sleep_mode(ctr: &AtClient<'_>, mode: SleepMode) -> Result<(), AtError> {
     request!("AT+CSCLK={}", mode as i32).send(ctr).await?;
@@ -376,28 +397,5 @@ impl<S: Read + Write> AtController<S> {
                 Err(_e) => warn!("Read error"),
             };
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::*;
-
-    #[test]
-    fn test_network_registration() {
-        /*
-        let (n, stat) = parse_network_registration_response("+CREG: 0,1").unwrap();
-        assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-        assert_eq!(stat, NetworkRegistrationState::Registered);
-
-        let (n, stat) = parse_network_registration_response("+CREG: 0,0").unwrap();
-        assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-        assert_eq!(stat, NetworkRegistrationState::NotRegistered);
-
-        let (n, stat) = parse_network_registration_response("+CREG: 0,11").unwrap();
-        assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-        assert_eq!(stat, NetworkRegistrationState::NotRegisteredSearching);
-        */
     }
 }
