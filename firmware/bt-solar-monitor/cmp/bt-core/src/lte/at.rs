@@ -63,25 +63,45 @@ impl AtRequestMessage {
         self
     }
 
-    async fn send(self, client: &impl AtClient) -> AtResponseMessage {
+    async fn send(self, client: &impl AtClient) -> Result<AtResponseMessage, AtError> {
         client.send(self).await;
-        let response = client.receive().await?;
-        Ok(response)
+        client.receive().await
     }
 }
 
-type AtResponseMessage = Result<Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>, AtError>;
+//type AtResponseMessage = Result<Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>, AtError>;
+pub struct AtResponseMessage(Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>);
+
+impl AtResponseMessage {
+    pub fn ensure_lines(&self, n: usize) -> Result<(), AtError> {
+        if self.0.len() == n {
+            Ok(())
+        } else {
+            Err(AtError::ResponseLineCountMismatch {
+                expected: n,
+                actual: self.0.len(),
+            })
+        }
+    }
+
+    pub fn line(&self, n: usize) -> Result<&str, AtError> {
+        self.0.get(n).map(|s| s.as_str()).ok_or(AtError::ResponseLineCountMismatch {
+            expected: n + 1,
+            actual: self.0.len(),
+        })
+    }
+}
 
 pub struct State {
     pub(super) tx_channel: Channel<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-    pub(super) rx_channel: Channel<NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
+    pub(super) rx_channel: Channel<NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
 }
 
 impl State {
     pub fn new() -> Self {
         Self {
             tx_channel: Channel::<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>::new(),
-            rx_channel: Channel::<NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>::new(),
+            rx_channel: Channel::<NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>::new(),
         }
     }
 }
@@ -94,16 +114,19 @@ impl Default for State {
 
 pub trait AtClient {
     async fn send(&self, request: AtRequestMessage);
-    async fn receive(&self) -> AtResponseMessage;
+    async fn receive(&self) -> Result<AtResponseMessage, AtError>;
 }
 
 pub struct AtClientImpl<'ch> {
     tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-    rx: Receiver<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
+    rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
 }
 
 impl<'ch> AtClientImpl<'ch> {
-    pub fn new(tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>, rx: Receiver<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>) -> Self {
+    pub fn new(
+        tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+        rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+    ) -> Self {
         Self { tx, rx }
     }
 }
@@ -113,7 +136,7 @@ impl<'ch> AtClient for AtClientImpl<'ch> {
         self.tx.send(request).await;
     }
 
-    async fn receive(&self) -> AtResponseMessage {
+    async fn receive(&self) -> Result<AtResponseMessage, AtError> {
         self.rx.receive().await
     }
 }
@@ -146,7 +169,7 @@ fn number(input: &str) -> IResult<&str, u32> {
 
 pub struct Runner<'ch, S: Read + Write> {
     receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-    sender: Sender<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
+    sender: Sender<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
     at_controller: AtController<S>,
 }
 
@@ -154,7 +177,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
     pub fn new(
         stream: S,
         receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-        sender: Sender<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
+        sender: Sender<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
     ) -> Self {
         Self {
             receiver,
@@ -175,7 +198,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         }
     }
 
-    async fn send_command(&mut self, command: AtRequestMessage) -> AtResponseMessage {
+    async fn send_command(&mut self, command: AtRequestMessage) -> Result<AtResponseMessage, AtError> {
         if let Err(_e) = self.at_controller.stream.write_all(command.command.as_bytes()).await {
             error!("Failed to send command: {}", command.command);
             return Err(AtError::Error);
@@ -217,7 +240,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         {
             Ok(response) => {
                 info!("Command '{}' => completed", command.command);
-                response
+                response.map(AtResponseMessage)
             }
             Err(_e) => {
                 error!("Command '{}' => timeout", command.command);
@@ -279,7 +302,7 @@ impl<S: Read + Write> AtController<S> {
 
 #[cfg(test)]
 pub mod mocks {
-    use crate::lte::at::{AT_BUFFER_SIZE, MAX_RESPONSE_LINES};
+    use crate::lte::at::{AT_BUFFER_SIZE, AtError, MAX_RESPONSE_LINES};
     use core::cell::RefCell;
 
     use super::{AtClient, AtRequestMessage, AtResponseMessage};
@@ -303,8 +326,8 @@ pub mod mocks {
             assert_eq!(self.request, request);
         }
 
-        async fn receive(&self) -> AtResponseMessage {
-            self.response.take().unwrap()
+        async fn receive(&self) -> Result<AtResponseMessage, AtError> {
+            Ok(self.response.take().unwrap())
         }
     }
 
@@ -319,7 +342,7 @@ pub mod mocks {
                 command: heapless::String::try_from(command).unwrap(),
                 timeout: embassy_time::Duration::from_secs(5),
             },
-            Ok(lines),
+            AtResponseMessage(lines),
         )
     }
 }

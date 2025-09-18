@@ -69,13 +69,7 @@ impl TryFrom<u32> for NetworkRegistrationState {
 // +CREG: 0,1
 pub async fn get_network_registration(ctr: &impl AtClient) -> Result<(NetworkRegistrationUrcConfig, NetworkRegistrationState), AtError> {
     let response = at_request!("AT+CREG?").send(ctr).await?;
-    if response.len() != 1 {
-        return Err(AtError::ResponseLineCountMismatch {
-            expected: 1,
-            actual: response.len(),
-        });
-    }
-    let (_, (_, n, _, stat)) = (tag("+CREG: "), number, sperator, number).parse(&response[0])?;
+    let (_, (_, n, _, stat)) = (tag("+CREG: "), number, sperator, number).parse(response.line(0)?)?;
     Ok((n.try_into()?, stat.try_into()?))
 }
 

@@ -33,13 +33,7 @@ pub async fn set_sleep_mode(client: &impl AtClient, mode: SleepMode) -> Result<(
 
 pub async fn read_sleep_mode(client: &impl AtClient) -> Result<SleepMode, AtError> {
     let response = at_request!("AT+CSCLK?").send(client).await?;
-    if response.len() != 1 {
-        return Err(AtError::ResponseLineCountMismatch {
-            expected: 1,
-            actual: response.len(),
-        });
-    }
-    let (_, (_, mode)) = (tag("+CSCLK: "), number).parse(&response[0])?;
+    let (_, (_, mode)) = (tag("+CSCLK: "), number).parse(response.line(0)?)?;
     mode.try_into()
 }
 
