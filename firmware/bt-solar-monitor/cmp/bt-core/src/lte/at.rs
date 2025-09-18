@@ -70,24 +70,30 @@ impl AtRequestMessage {
 }
 
 //type AtResponseMessage = Result<Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>, AtError>;
-pub struct AtResponseMessage(Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>);
+pub struct AtResponseMessage {
+    lines: Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>,
+}
 
 impl AtResponseMessage {
+    pub fn new(lines: Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>) -> Self {
+        Self { lines }
+    }
+
     pub fn ensure_lines(&self, n: usize) -> Result<(), AtError> {
-        if self.0.len() == n {
+        if self.lines.len() == n {
             Ok(())
         } else {
             Err(AtError::ResponseLineCountMismatch {
                 expected: n,
-                actual: self.0.len(),
+                actual: self.lines.len(),
             })
         }
     }
 
     pub fn line(&self, n: usize) -> Result<&str, AtError> {
-        self.0.get(n).map(|s| s.as_str()).ok_or(AtError::ResponseLineCountMismatch {
+        self.lines.get(n).map(|s| s.as_str()).ok_or(AtError::ResponseLineCountMismatch {
             expected: n + 1,
-            actual: self.0.len(),
+            actual: self.lines.len(),
         })
     }
 }
@@ -240,7 +246,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         {
             Ok(response) => {
                 info!("Command '{}' => completed", command.command);
-                response.map(AtResponseMessage)
+                response.map(AtResponseMessage::new)
             }
             Err(_e) => {
                 error!("Command '{}' => timeout", command.command);
@@ -342,7 +348,7 @@ pub mod mocks {
                 command: heapless::String::try_from(command).unwrap(),
                 timeout: embassy_time::Duration::from_secs(5),
             },
-            AtResponseMessage(lines),
+            AtResponseMessage::new(lines),
         )
     }
 }
