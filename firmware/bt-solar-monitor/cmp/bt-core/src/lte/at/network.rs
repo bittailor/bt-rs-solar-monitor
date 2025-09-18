@@ -2,7 +2,7 @@ use heapless::format;
 
 use crate::{
     at_request,
-    lte::at::{AtClient, AtError, number, sperator},
+    lte::at::{AtClient, AtError},
 };
 use nom::{Parser, bytes::complete::tag};
 
@@ -69,7 +69,7 @@ impl TryFrom<u32> for NetworkRegistrationState {
 // +CREG: 0,1
 pub async fn get_network_registration(ctr: &impl AtClient) -> Result<(NetworkRegistrationUrcConfig, NetworkRegistrationState), AtError> {
     let response = at_request!("AT+CREG?").send(ctr).await?;
-    let (_, (_, n, _, stat)) = (tag("+CREG: "), number, sperator, number).parse(response.line(0)?)?;
+    let (_, (_, n, _, stat)) = (tag("+CREG: "), nom::character::complete::u32, tag(","), nom::character::complete::u32).parse(response.line(0)?)?;
     Ok((n.try_into()?, stat.try_into()?))
 }
 

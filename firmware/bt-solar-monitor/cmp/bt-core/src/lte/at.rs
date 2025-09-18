@@ -3,6 +3,7 @@
 pub mod network;
 pub mod packet_domain;
 pub mod serial_interface;
+pub mod status_control;
 
 use core::mem::replace;
 
@@ -14,7 +15,6 @@ use embassy_sync::{
 use embassy_time::{Duration, with_timeout};
 use embedded_io_async::{Read, Write};
 use heapless::{CapacityError, String, Vec};
-use nom::{IResult, bytes::complete::tag};
 
 pub const ERROR_STRING_SIZE: usize = 64;
 const CHANNEL_SIZE: usize = 2;
@@ -69,7 +69,8 @@ impl AtRequestMessage {
     }
 }
 
-//type AtResponseMessage = Result<Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>, AtError>;
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct AtResponseMessage {
     lines: Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>,
 }
@@ -159,19 +160,6 @@ pub async fn at(client: &impl AtClient) -> Result<(), AtError> {
     at_request!("AT").with_timeout(Duration::from_millis(200)).send(client).await?;
     Ok(())
 }
-
-// parsers tokens
-
-fn sperator(input: &str) -> IResult<&str, ()> {
-    let (input, _) = tag(",")(input)?;
-    Ok((input, ()))
-}
-
-fn number(input: &str) -> IResult<&str, u32> {
-    nom::character::complete::u32(input)
-}
-
-//
 
 pub struct Runner<'ch, S: Read + Write> {
     receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,

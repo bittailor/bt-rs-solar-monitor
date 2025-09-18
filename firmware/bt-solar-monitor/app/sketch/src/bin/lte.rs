@@ -73,6 +73,12 @@ async fn main(_spawner: Spawner) {
             }
             info!("network registered!");
 
+            for _ in 0..5 {
+                let rssi = lte.query_signal_quality().await?;
+                info!(" -> rssi: {}", rssi);
+                Timer::after_secs(10).await;
+            }
+
             /*
             let sleep_mode = lte.read_sleep_mode().await?;
             info!("Current sleep mode: {:?}", sleep_mode);

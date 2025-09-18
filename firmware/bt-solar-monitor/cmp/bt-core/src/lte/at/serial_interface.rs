@@ -3,7 +3,7 @@ use nom::{Parser, bytes::complete::tag};
 
 use crate::{
     at_request,
-    lte::at::{AtClient, AtError, number},
+    lte::at::{AtClient, AtError},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -33,7 +33,7 @@ pub async fn set_sleep_mode(client: &impl AtClient, mode: SleepMode) -> Result<(
 
 pub async fn read_sleep_mode(client: &impl AtClient) -> Result<SleepMode, AtError> {
     let response = at_request!("AT+CSCLK?").send(client).await?;
-    let (_, (_, mode)) = (tag("+CSCLK: "), number).parse(response.line(0)?)?;
+    let (_, (_, mode)) = (tag("+CSCLK: "), nom::character::complete::u32).parse(response.line(0)?)?;
     mode.try_into()
 }
 

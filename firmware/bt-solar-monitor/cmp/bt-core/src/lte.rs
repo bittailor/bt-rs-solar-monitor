@@ -4,7 +4,7 @@ use core::str::{self};
 
 use embedded_io_async::{Read, Write};
 
-use crate::lte::at::{AtError, serial_interface::SleepMode};
+use crate::lte::at::{AtError, serial_interface::SleepMode, status_control::Rssi};
 
 pub struct State {
     at_state: at::State,
@@ -74,5 +74,12 @@ impl Lte<'_> {
 
     pub async fn set_sleep_mode(&self, mode: SleepMode) -> Result<(), LteError> {
         at::serial_interface::set_sleep_mode(&self.at_ctr, mode).await.map_err(Into::into)
+    }
+
+    pub async fn query_signal_quality(&self) -> Result<Rssi, LteError> {
+        at::status_control::query_signal_quality(&self.at_ctr)
+            .await
+            .map(|(rssi, _)| rssi)
+            .map_err(Into::into)
     }
 }
