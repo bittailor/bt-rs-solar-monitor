@@ -4,7 +4,7 @@ use core::str::{self};
 
 use embedded_io_async::{Read, Write};
 
-use crate::lte::at::{AtError, SleepMode};
+use crate::lte::at::{AtError, serial_interface::SleepMode};
 
 pub struct State {
     at_state: at::State,
@@ -16,10 +16,16 @@ impl State {
     }
 }
 
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub async fn new_lte<'a, S: Read + Write>(state: &'a mut State, stream: S) -> (Lte<'a>, at::Runner<'a, S>) {
     let runner = at::Runner::new(stream, state.at_state.tx_channel.receiver(), state.at_state.rx_channel.sender());
     let lte = Lte {
-        at_ctr: at::AtClient::new(state.at_state.tx_channel.sender(), state.at_state.rx_channel.receiver()),
+        at_ctr: at::AtClientImpl::new(state.at_state.tx_channel.sender(), state.at_state.rx_channel.receiver()),
     };
     (lte, runner)
 }
@@ -45,7 +51,7 @@ impl From<core::fmt::Error> for LteError {
 }
 
 pub struct Lte<'ch> {
-    at_ctr: at::AtClient<'ch>,
+    at_ctr: at::AtClientImpl<'ch>,
 }
 
 impl Lte<'_> {
@@ -54,19 +60,19 @@ impl Lte<'_> {
     }
 
     pub async fn set_apn(&self, apn: &str) -> Result<(), LteError> {
-        at::set_apn(&self.at_ctr, apn).await.map_err(Into::into)
+        at::packet_domain::set_apn(&self.at_ctr, apn).await.map_err(Into::into)
     }
 
-    pub async fn read_network_registration(&self) -> Result<(at::NetworkRegistrationUrcConfig, at::NetworkRegistrationState), LteError> {
-        at::get_network_registration(&self.at_ctr).await.map_err(Into::into)
+    pub async fn read_network_registration(&self) -> Result<(at::network::NetworkRegistrationUrcConfig, at::network::NetworkRegistrationState), LteError> {
+        at::network::get_network_registration(&self.at_ctr).await.map_err(Into::into)
     }
 
     // AT+CSCLK
     pub async fn read_sleep_mode(&self) -> Result<SleepMode, LteError> {
-        at::read_sleep_mode(&self.at_ctr).await.map_err(Into::into)
+        at::serial_interface::read_sleep_mode(&self.at_ctr).await.map_err(Into::into)
     }
 
     pub async fn set_sleep_mode(&self, mode: SleepMode) -> Result<(), LteError> {
-        at::set_sleep_mode(&self.at_ctr, mode).await.map_err(Into::into)
+        at::serial_interface::set_sleep_mode(&self.at_ctr, mode).await.map_err(Into::into)
     }
 }

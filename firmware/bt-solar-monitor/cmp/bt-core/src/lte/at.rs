@@ -1,3 +1,9 @@
+#![allow(async_fn_in_trait)]
+
+pub mod network;
+pub mod packet_domain;
+pub mod serial_interface;
+
 use core::mem::replace;
 
 use embassy_futures::select::select;
@@ -7,8 +13,8 @@ use embassy_sync::{
 };
 use embassy_time::{Duration, with_timeout};
 use embedded_io_async::{Read, Write};
-use heapless::{String, Vec, format};
-use nom::{IResult, Parser, bytes::complete::tag};
+use heapless::{CapacityError, String, Vec};
+use nom::{IResult, bytes::complete::tag};
 
 pub const ERROR_STRING_SIZE: usize = 64;
 const CHANNEL_SIZE: usize = 2;
@@ -20,8 +26,8 @@ const MAX_RESPONSE_LINES: usize = 8;
 pub enum AtError {
     Timeout,
     FormatError,
+    CapacityError,
     EnumParseError(String<ERROR_STRING_SIZE>),
-    MissingResponseLine,
     ResponseLineCountMismatch { expected: usize, actual: usize },
     Error,
 }
@@ -32,85 +38,20 @@ impl From<core::fmt::Error> for AtError {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum NetworkRegistrationUrcConfig {
-    /// 0 disable network registration unsolicited result code.
-    UrcDisabled = 0,
-    /// 1 enable network registration unsolicited result code +CREG: <stat>.
-    UrcEnabled = 1,
-    /// enable network registration and location information unsolicited result code +CREG: <stat>[,<lac>,<ci>].
-    UrcVerbose = 2,
-}
-
-impl TryFrom<u32> for NetworkRegistrationUrcConfig {
-    type Error = AtError;
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(NetworkRegistrationUrcConfig::UrcDisabled),
-            1 => Ok(NetworkRegistrationUrcConfig::UrcEnabled),
-            2 => Ok(NetworkRegistrationUrcConfig::UrcVerbose),
-            _ => Err(AtError::EnumParseError(format!("Invalid NetworkRegistrationUrcConfig value: {}", value).unwrap_or_default())),
-        }
+impl From<nom::Err<nom::error::Error<&str>>> for AtError {
+    fn from(_err: nom::Err<nom::error::Error<&str>>) -> Self {
+        AtError::Error
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum NetworkRegistrationState {
-    /// 0 not registered, ME is not currently searching a new operator to register to.
-    NotRegistered = 0,
-    /// 1 registered, home network.
-    Registered = 1,
-    /// 2 not registered, but ME is currently searching a new operator to register to.
-    NotRegisteredSearching = 2,
-    /// 3 registration denied.
-    RegistrationDenied = 3,
-    /// 4 unknown.
-    Unknown = 4,
-    /// 5 registered, roaming.
-    RegisteredRoaming = 5,
-    /// 6 registered for "SMS only", home network (applicable only whenE-UTRAN)
-    RegisteredSmsOnly = 6,
-}
-
-impl TryFrom<u32> for NetworkRegistrationState {
-    type Error = AtError;
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(NetworkRegistrationState::NotRegistered),
-            1 => Ok(NetworkRegistrationState::Registered),
-            2 => Ok(NetworkRegistrationState::NotRegisteredSearching),
-            3 => Ok(NetworkRegistrationState::RegistrationDenied),
-            4 => Ok(NetworkRegistrationState::Unknown),
-            5 => Ok(NetworkRegistrationState::RegisteredRoaming),
-            6 => Ok(NetworkRegistrationState::RegisteredSmsOnly),
-            11 => Ok(NetworkRegistrationState::NotRegisteredSearching), // ???
-            _ => Err(AtError::EnumParseError(format!("Invalid NetworkRegistrationState value: {}", value).unwrap_or_default())),
-        }
+impl From<CapacityError> for AtError {
+    fn from(_err: CapacityError) -> Self {
+        AtError::CapacityError
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum SleepMode {
-    Off = 0,
-    DtrSleep = 1,
-    RxSleep = 2,
-}
-
-impl TryFrom<u32> for SleepMode {
-    type Error = AtError;
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(SleepMode::Off),
-            1 => Ok(SleepMode::DtrSleep),
-            2 => Ok(SleepMode::RxSleep),
-            _ => Err(AtError::EnumParseError(format!("Invalid SleepMode value: {}", value).unwrap_or_default())),
-        }
-    }
-}
-
 pub struct AtRequestMessage {
     command: String<AT_BUFFER_SIZE>,
     timeout: Duration,
@@ -122,9 +63,9 @@ impl AtRequestMessage {
         self
     }
 
-    async fn send(self, ctr: &AtClient<'_>) -> AtResponseMessage {
-        ctr.tx.send(self).await;
-        let response = ctr.rx.receive().await?;
+    async fn send(self, client: &impl AtClient) -> AtResponseMessage {
+        client.send(self).await;
+        let response = client.receive().await?;
         Ok(response)
     }
 }
@@ -145,112 +86,49 @@ impl State {
     }
 }
 
-pub struct AtClient<'ch> {
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub trait AtClient {
+    async fn send(&self, request: AtRequestMessage);
+    async fn receive(&self) -> AtResponseMessage;
+}
+
+pub struct AtClientImpl<'ch> {
     tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
     rx: Receiver<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>,
 }
 
-impl<'ch> AtClient<'ch> {
+impl<'ch> AtClientImpl<'ch> {
     pub fn new(tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>, rx: Receiver<'ch, NoopRawMutex, AtResponseMessage, CHANNEL_SIZE>) -> Self {
         Self { tx, rx }
     }
 }
 
-/*
-macro_rules! request {
-    ($ctr:expr, $n:expr, $s:literal $(, $x:expr)* $(,)?) => {{
-        let req_str = heapless::format!($s $(, $x)*)?;
-        $ctr.tx.send(req_str).await;
-        let mut response = $ctr.rx.receive().await?;
-        if response.len() != $n {
-            return Err(AtError::Error);
-        }
-        response
-    }};
-}
-*/
+impl<'ch> AtClient for AtClientImpl<'ch> {
+    async fn send(&self, request: AtRequestMessage) {
+        self.tx.send(request).await;
+    }
 
-macro_rules! request {
+    async fn receive(&self) -> AtResponseMessage {
+        self.rx.receive().await
+    }
+}
+
+#[macro_export]
+macro_rules! at_request {
     ($s:literal $(, $x:expr)* $(,)?) => {{
         let req_str = heapless::format!($s $(, $x)*)?;
-        AtRequestMessage { command: req_str, timeout: Duration::from_secs(5) }
+        $crate::lte::at::AtRequestMessage { command: req_str, timeout: embassy_time::Duration::from_secs(5) }
     }};
 }
 
-pub async fn at(ctr: &AtClient<'_>) -> Result<(), AtError> {
-    request!("AT").with_timeout(Duration::from_millis(200)).send(ctr).await?;
+pub async fn at(client: &impl AtClient) -> Result<(), AtError> {
+    at_request!("AT").with_timeout(Duration::from_millis(200)).send(client).await?;
     Ok(())
-}
-
-pub async fn set_apn(ctr: &AtClient<'_>, apn: &str) -> Result<(), AtError> {
-    request!("AT+CGDCONT=1,\"IP\",\"{}\"", apn).send(ctr).await?;
-    Ok(())
-}
-
-// ----
-
-// +CREG: <n>,<stat>[,<lac>,<ci>]
-// +CREG: 0,1
-pub async fn get_network_registration(ctr: &AtClient<'_>) -> Result<(NetworkRegistrationUrcConfig, NetworkRegistrationState), AtError> {
-    let response = request!("AT+CREG?").send(ctr).await?;
-    if response.len() != 1 {
-        return Err(AtError::ResponseLineCountMismatch {
-            expected: 1,
-            actual: response.len(),
-        });
-    }
-    parse_network_registration_response(&response[0])
-}
-fn parse_network_registration_response(input: &str) -> Result<(NetworkRegistrationUrcConfig, NetworkRegistrationState), AtError> {
-    let (_, (_, n, _, stat)) = (tag("+CREG: "), number, sperator, number).parse(input)?;
-    Ok((n.try_into()?, stat.try_into()?))
-}
-#[test]
-fn test_network_registration() {
-    let (n, stat) = parse_network_registration_response("+CREG: 0,1").unwrap();
-    assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-    assert_eq!(stat, NetworkRegistrationState::Registered);
-
-    let (n, stat) = parse_network_registration_response("+CREG: 0,0").unwrap();
-    assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-    assert_eq!(stat, NetworkRegistrationState::NotRegistered);
-
-    let (n, stat) = parse_network_registration_response("+CREG: 0,11").unwrap();
-    assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-    assert_eq!(stat, NetworkRegistrationState::NotRegisteredSearching);
-}
-
-// ----
-
-pub async fn set_sleep_mode(ctr: &AtClient<'_>, mode: SleepMode) -> Result<(), AtError> {
-    request!("AT+CSCLK={}", mode as i32).send(ctr).await?;
-    Ok(())
-}
-
-pub async fn read_sleep_mode(ctr: &AtClient<'_>) -> Result<SleepMode, AtError> {
-    let response = request!("AT+CSCLK?").send(ctr).await?;
-    if response.len() != 1 {
-        return Err(AtError::ResponseLineCountMismatch {
-            expected: 1,
-            actual: response.len(),
-        });
-    }
-    let (_, (_, mode)) = (tag("+CSCLK: "), number).parse(&response[0])?;
-    Ok(mode.try_into()?)
-}
-
-pub struct GetNetworkRegistrationStatus {}
-
-impl GetNetworkRegistrationStatus {
-    pub fn execute() -> Result<(NetworkRegistrationUrcConfig, NetworkRegistrationState), AtError> {
-        todo!()
-    }
-}
-
-impl From<nom::Err<nom::error::Error<&str>>> for AtError {
-    fn from(_err: nom::Err<nom::error::Error<&str>>) -> Self {
-        AtError::Error
-    }
 }
 
 // parsers tokens
@@ -287,7 +165,6 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
 
     pub async fn run(mut self) {
         loop {
-            //let receiver = self.channel.receiver();
             match select(self.receiver.receive(), self.at_controller.poll_urc()).await {
                 embassy_futures::select::Either::First(cmd) => {
                     let response = self.send_command(cmd).await;
@@ -321,7 +198,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
                     warn!("Command error => {} response lines", lines.len());
                     break Err(AtError::Error);
                 } else {
-                    if lines.len() == 0 && line == command.command {
+                    if lines.is_empty() && line == command.command {
                         trace!("Skipping echo line");
                         continue; // skip echo line
                     }
@@ -380,7 +257,7 @@ impl<S: Read + Write> AtController<S> {
                 Ok(_) => {
                     if char_buf[0] == b'\n' || char_buf[0] == b'\r' {
                         trace!("UART.RX line of lenght {}", self.line_buffer.len());
-                        if self.line_buffer.len() > 0 {
+                        if !self.line_buffer.is_empty() {
                             match String::from_utf8(replace(&mut self.line_buffer, heapless::Vec::new())) {
                                 Ok(line) => {
                                     debug!("UART.RX> {}", line.as_str());
@@ -397,5 +274,52 @@ impl<S: Read + Write> AtController<S> {
                 Err(_e) => warn!("Read error"),
             };
         }
+    }
+}
+
+#[cfg(test)]
+pub mod mocks {
+    use crate::lte::at::{AT_BUFFER_SIZE, MAX_RESPONSE_LINES};
+    use core::cell::RefCell;
+
+    use super::{AtClient, AtRequestMessage, AtResponseMessage};
+
+    pub struct AtClientMock {
+        request: AtRequestMessage,
+        response: RefCell<Option<AtResponseMessage>>,
+    }
+
+    impl AtClientMock {
+        pub fn new(request: AtRequestMessage, response: AtResponseMessage) -> Self {
+            Self {
+                request,
+                response: RefCell::new(Some(response)),
+            }
+        }
+    }
+
+    impl AtClient for AtClientMock {
+        async fn send(&self, request: AtRequestMessage) {
+            assert_eq!(self.request, request);
+        }
+
+        async fn receive(&self) -> AtResponseMessage {
+            self.response.take().unwrap()
+        }
+    }
+
+    pub fn mock_request(command: &str, response_lines: &[&str]) -> AtClientMock {
+        let mut lines = heapless::Vec::<heapless::String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>::new();
+        for line in response_lines {
+            lines.push(heapless::String::<AT_BUFFER_SIZE>::try_from(*line).unwrap()).unwrap();
+        }
+
+        AtClientMock::new(
+            AtRequestMessage {
+                command: heapless::String::try_from(command).unwrap(),
+                timeout: embassy_time::Duration::from_secs(5),
+            },
+            Ok(lines),
+        )
     }
 }

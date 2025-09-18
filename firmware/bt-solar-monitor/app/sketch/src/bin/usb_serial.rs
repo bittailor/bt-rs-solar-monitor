@@ -87,7 +87,7 @@ async fn main(_spawner: Spawner) {
             let mut counter = 0;
             loop {
                 let _ = write!(Writer(&buffer), "USB loop {}\r\n", counter);
-                let mut rx: [u8; 1024 as usize] = [0; 1024 as usize];
+                let mut rx: [u8; 1024_usize] = [0; 1024_usize];
                 let len = buffer.read(&mut rx[..]).await;
                 if usb_tx.dtr() && usb_tx.rts() {
                     defmt::info!("DTR and RTS are set, writing to USB");
@@ -138,13 +138,13 @@ impl<'d, const N: usize> core::fmt::Write for Writer<'d, N> {
         // The Pipe is implemented in such way that we cannot
         // write across the wraparound discontinuity.
         let b = s.as_bytes();
-        if let Ok(n) = self.0.try_write(b) {
-            if n < b.len() {
-                // We wrote some data but not all, attempt again
-                // as the reason might be a wraparound in the
-                // ring buffer, which resolves on second attempt.
-                let _ = self.0.try_write(&b[n..]);
-            }
+        if let Ok(n) = self.0.try_write(b)
+            && n < b.len()
+        {
+            // We wrote some data but not all, attempt again
+            // as the reason might be a wraparound in the
+            // ring buffer, which resolves on second attempt.
+            let _ = self.0.try_write(&b[n..]);
         }
         Ok(())
     }

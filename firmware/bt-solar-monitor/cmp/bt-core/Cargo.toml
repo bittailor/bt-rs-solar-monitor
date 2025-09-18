@@ -24,3 +24,4 @@ nom = { version = "8.0.0", features = [], default-features = false }
 
 [dev-dependencies]
 defmt-rtt = "1.0.0"
+tokio = { version = "1.47.1", features = ["full"] }

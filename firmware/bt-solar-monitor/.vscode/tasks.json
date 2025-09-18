@@ -2,6 +2,21 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"type": "vscode-just",
+			"task": "just",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": [
+				"$rustc"
+			],
+			"presentation": {
+				"clear": true
+			},
+			"label": "just"
+		},
+		{
 			"type": "cargo",
 			"command": "build",
 			"dependsOn": [
@@ -15,7 +30,6 @@
 			],
 			"group": {
 				"kind": "build",
-				"isDefault": true
 			},
 			"presentation": {
 				"clear": true
