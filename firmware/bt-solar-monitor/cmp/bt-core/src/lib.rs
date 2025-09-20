@@ -3,4 +3,4 @@
 pub(crate) mod fmt;
 
 pub mod at;
-pub mod lte;
+pub mod net;

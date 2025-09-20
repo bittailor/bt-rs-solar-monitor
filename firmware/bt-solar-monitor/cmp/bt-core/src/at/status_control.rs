@@ -1,6 +1,6 @@
 use crate::{
-    at_request,
     at::{AtClient, AtError},
+    at_request,
 };
 use heapless::format;
 use nom::{Parser, bytes::complete::tag};
@@ -37,4 +37,10 @@ pub async fn query_signal_quality(ctr: &impl AtClient) -> Result<(Rssi, u32), At
         _ => return Err(AtError::EnumParseError(format!("Invalid RSSI value: {}", raw_rssi)?)),
     };
     Ok((rssi, raw_ber))
+}
+
+// AT+CPOF
+pub async fn power_down(ctr: &impl AtClient) -> Result<(), AtError> {
+    at_request!("AT+CPOF").send(ctr).await?;
+    Ok(())
 }

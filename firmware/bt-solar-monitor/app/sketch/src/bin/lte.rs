@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use bt_core::lte::LteError;
+use bt_core::net::cellular::CellularError;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
@@ -10,6 +10,7 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::peripherals::UART0;
 use embassy_rp::uart::{self, BufferedInterruptHandler, BufferedUart};
 use embassy_time::Timer;
+use embedded_hal::digital::OutputPin;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -21,8 +22,8 @@ bind_interrupts!(struct Irqs {
 async fn main(_spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
     let mut led = Output::new(p.PIN_25, Level::Low);
-    let mut reset = Output::new(p.PIN_16, Level::High);
-    let mut _pwrkey = Output::new(p.PIN_17, Level::High);
+    let reset = Output::new(p.PIN_16, Level::High);
+    let pwrkey = Output::new(p.PIN_17, Level::High);
 
     let (tx_pin, rx_pin, uart) = (p.PIN_0, p.PIN_1, p.UART0);
 
@@ -32,8 +33,8 @@ async fn main(_spawner: Spawner) {
     let rx_buf = &mut RX_BUF.init([0; 1024])[..];
     let uart: BufferedUart = BufferedUart::new(uart, tx_pin, rx_pin, Irqs, tx_buf, rx_buf, uart::Config::default());
 
-    let mut lte_state = bt_core::lte::State::new();
-    let (lte, lte_runner) = bt_core::lte::new_lte(&mut lte_state, uart).await;
+    let mut lte_state = bt_core::net::cellular::sim_com_a67::State::new();
+    let (mut lte, lte_runner) = bt_core::net::cellular::sim_com_a67::new(&mut lte_state, uart, pwrkey, reset).await;
 
     let blinky = async {
         loop {
@@ -46,7 +47,7 @@ async fn main(_spawner: Spawner) {
     };
 
     let sequenc = async {
-        match lte_sequence(&lte, &mut reset).await {
+        match lte_sequence(&mut lte).await {
             Ok(_) => info!("LTE commands done"),
             Err(e) => error!("LTE commands error: {:?}", e),
         }
@@ -55,19 +56,9 @@ async fn main(_spawner: Spawner) {
     join3(blinky, lte_runner.run(), sequenc).await;
 }
 
-async fn lte_sequence(lte: &bt_core::lte::Lte<'_>, reset: &mut Output<'_>) -> Result<(), LteError> {
-    info!("reset ...");
-    reset.set_low();
-    Timer::after_millis(2500).await;
-    reset.set_high();
-    info!("... wait a bit for module to start ...");
-    Timer::after_millis(5000).await;
-    info!("... reset done");
+async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin>) -> Result<(), CellularError> {
+    lte.power_on().await?;
 
-    while lte.at().await.is_err() {
-        error!("LTE module not responding to AT command, retrying...");
-        Timer::after_secs(2).await;
-    }
     lte.set_apn("gprs.swisscom.ch").await?;
 
     while lte.read_network_registration().await?.1 != bt_core::at::network::NetworkRegistrationState::Registered {
@@ -77,6 +68,14 @@ async fn lte_sequence(lte: &bt_core::lte::Lte<'_>, reset: &mut Output<'_>) -> Re
     }
     info!("network registered!");
 
+    Timer::after_secs(10).await;
+    info!("power off ...");
+    lte.power_down().await?;
+    info!("... power off done");
+
+    Ok(())
+
+    /*
     loop {
         let rssi = lte.query_signal_quality().await?;
         info!(" -> rssi: {}", rssi);
@@ -96,4 +95,5 @@ async fn lte_sequence(lte: &bt_core::lte::Lte<'_>, reset: &mut Output<'_>) -> Re
             info!("... retrying ...");
         }
     }
+    */
 }

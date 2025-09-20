@@ -1,5 +1,6 @@
 #![allow(async_fn_in_trait)]
 
+pub mod http;
 pub mod network;
 pub mod packet_domain;
 pub mod serial_interface;
