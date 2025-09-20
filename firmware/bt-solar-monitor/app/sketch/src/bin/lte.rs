@@ -35,11 +35,6 @@ async fn main(_spawner: Spawner) {
     let mut lte_state = bt_core::lte::State::new();
     let (lte, lte_runner) = bt_core::lte::new_lte(&mut lte_state, uart).await;
 
-    /*
-    let lte: bt_core::lte::Runner<_, ThreadModeRawMutex, 32> = bt_core::lte::Runner::new(uart, channel.receiver());
-    let sender = channel.sender();
-    */
-
     let blinky = async {
         loop {
             info!("loop");
@@ -58,7 +53,6 @@ async fn main(_spawner: Spawner) {
     };
 
     join3(blinky, lte_runner.run(), sequenc).await;
-    //join(blinky, commands).await;
 }
 
 async fn lte_sequence(lte: &bt_core::lte::Lte<'_>, reset: &mut Output<'_>) -> Result<(), LteError> {
@@ -103,82 +97,3 @@ async fn lte_sequence(lte: &bt_core::lte::Lte<'_>, reset: &mut Output<'_>) -> Re
         }
     }
 }
-
-/*
-let call = async {
-            info!("reset ...");
-            reset.set_low();
-            Timer::after_millis(2500).await;
-            reset.set_high();
-            info!("... wait a bit for module to start ...");
-            Timer::after_millis(5000).await;
-            info!("... reset done");
-
-            while lte.at().await.is_err() {
-                error!("LTE module not responding to AT command, retrying...");
-                Timer::after_secs(2).await;
-            }
-            lte.set_apn("gprs.swisscom.ch").await?;
-
-            while lte.read_network_registration().await?.1 != bt_core::lte::at::network::NetworkRegistrationState::Registered {
-                warn!("Not registered to network yet, waiting...");
-                Timer::after_secs(2).await;
-                info!("... retrying ...");
-            }
-            info!("network registered!");
-
-            loop {
-                let rssi = lte.query_signal_quality().await?;
-                info!(" -> rssi: {}", rssi);
-                Timer::after_secs(10).await;
-
-                info!("Set sleep mode");
-                lte.set_sleep_mode(bt_core::lte::at::serial_interface::SleepMode::RxSleep).await?;
-                info!("... wait a bit in sleep mode ...");
-                Timer::after_secs(30).await;
-                while lte.at().await.is_err() {
-                    error!("LTE module not responding to AT command, retrying...");
-                }
-                info!("check network registration again");
-                while lte.read_network_registration().await?.1 != bt_core::lte::at::network::NetworkRegistrationState::Registered {
-                    warn!("Not registered to network yet, waiting...");
-                    Timer::after_secs(2).await;
-                    info!("... retrying ...");
-                }
-            }
-
-            / *
-            let sleep_mode = lte.read_sleep_mode().await?;
-            info!("Current sleep mode: {:?}", sleep_mode);
-
-            info!("... wait 60s ...");
-            Timer::after_secs(30).await;
-
-            info!("Set sleep mode");
-            lte.set_sleep_mode(bt_core::lte::at::SleepMode::RxSleep).await?;
-
-            info!("... wait a bit in sleep mode ...");
-            Timer::after_secs(30).await;
-
-            info!("... try wake up ...");
-            while lte.at().await.is_err() {
-                error!("LTE module not responding to AT command, retrying...");
-                Timer::after_secs(2).await;
-            }
-
-            info!("check again");
-            let sleep_mode = lte.read_sleep_mode().await?;
-            info!("Current sleep mode: {:?}", sleep_mode);
-
-            info!("check network registration again");
-            while lte.read_network_registration().await?.1 != bt_core::lte::at::NetworkRegistrationState::Registered {
-                warn!("Not registered to network yet, waiting...");
-                Timer::after_secs(2).await;
-                info!("... retrying ...");
-            }
-            info!("network registered!");
-            * /
-            Ok::<(), LteError>(())
-        };
-
-*/
