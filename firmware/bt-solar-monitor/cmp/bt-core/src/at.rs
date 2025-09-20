@@ -152,7 +152,7 @@ impl<'ch> AtClient for AtClientImpl<'ch> {
 macro_rules! at_request {
     ($s:literal $(, $x:expr)* $(,)?) => {{
         let req_str = heapless::format!($s $(, $x)*)?;
-        $crate::lte::at::AtRequestMessage { command: req_str, timeout: embassy_time::Duration::from_secs(5) }
+        $crate::at::AtRequestMessage { command: req_str, timeout: embassy_time::Duration::from_secs(5) }
     }};
 }
 
@@ -296,7 +296,7 @@ impl<S: Read + Write> AtController<S> {
 
 #[cfg(test)]
 pub mod mocks {
-    use crate::lte::at::{AT_BUFFER_SIZE, AtError, MAX_RESPONSE_LINES};
+    use crate::at::{AT_BUFFER_SIZE, AtError, MAX_RESPONSE_LINES};
     use core::cell::RefCell;
 
     use super::{AtClient, AtRequestMessage, AtResponseMessage};

@@ -70,7 +70,7 @@ async fn lte_sequence(lte: &bt_core::lte::Lte<'_>, reset: &mut Output<'_>) -> Re
     }
     lte.set_apn("gprs.swisscom.ch").await?;
 
-    while lte.read_network_registration().await?.1 != bt_core::lte::at::network::NetworkRegistrationState::Registered {
+    while lte.read_network_registration().await?.1 != bt_core::at::network::NetworkRegistrationState::Registered {
         warn!("Not registered to network yet, waiting...");
         Timer::after_secs(2).await;
         info!("... retrying ...");
@@ -83,14 +83,14 @@ async fn lte_sequence(lte: &bt_core::lte::Lte<'_>, reset: &mut Output<'_>) -> Re
         Timer::after_secs(10).await;
 
         info!("Set sleep mode");
-        lte.set_sleep_mode(bt_core::lte::at::serial_interface::SleepMode::RxSleep).await?;
+        lte.set_sleep_mode(bt_core::at::serial_interface::SleepMode::RxSleep).await?;
         info!("... wait a bit in sleep mode ...");
         Timer::after_secs(30).await;
         while lte.at().await.is_err() {
             error!("LTE module not responding to AT command, retrying...");
         }
         info!("check network registration again");
-        while lte.read_network_registration().await?.1 != bt_core::lte::at::network::NetworkRegistrationState::Registered {
+        while lte.read_network_registration().await?.1 != bt_core::at::network::NetworkRegistrationState::Registered {
             warn!("Not registered to network yet, waiting...");
             Timer::after_secs(2).await;
             info!("... retrying ...");

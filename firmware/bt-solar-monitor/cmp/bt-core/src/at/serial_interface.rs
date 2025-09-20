@@ -2,8 +2,8 @@ use heapless::format;
 use nom::{Parser, bytes::complete::tag};
 
 use crate::{
+    at::{AtClient, AtError},
     at_request,
-    lte::at::{AtClient, AtError},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,7 +41,7 @@ pub async fn read_sleep_mode(client: &impl AtClient) -> Result<SleepMode, AtErro
 pub mod mocks {
 
     use super::*;
-    use crate::lte::at::mocks::mock_request;
+    use crate::at::mocks::mock_request;
 
     #[tokio::test]
     async fn test_read_sleep_mode() -> Result<(), AtError> {

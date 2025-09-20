@@ -1,6 +1,6 @@
 use crate::{
     at_request,
-    lte::at::{AtClient, AtError},
+    at::{AtClient, AtError},
 };
 use heapless::format;
 use nom::{Parser, bytes::complete::tag};

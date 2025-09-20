@@ -1,8 +1,8 @@
 use heapless::format;
 
 use crate::{
+    at::{AtClient, AtError},
     at_request,
-    lte::at::{AtClient, AtError},
 };
 use nom::{Parser, bytes::complete::tag};
 
@@ -77,7 +77,7 @@ pub async fn get_network_registration(ctr: &impl AtClient) -> Result<(NetworkReg
 pub mod mocks {
 
     use super::*;
-    use crate::lte::at::mocks::mock_request;
+    use crate::at::mocks::mock_request;
 
     #[tokio::test]
     async fn test_network_registration() -> Result<(), AtError> {

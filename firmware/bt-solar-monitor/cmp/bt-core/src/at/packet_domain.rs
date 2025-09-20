@@ -1,6 +1,6 @@
 use crate::{
     at_request,
-    lte::at::{AtClient, AtError},
+    at::{AtClient, AtError},
 };
 
 pub async fn set_apn(client: &impl AtClient, apn: &str) -> Result<(), AtError> {
