@@ -117,6 +117,31 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
         error!("http post failed: code={}", post_response.status());
     }
 
+    let multi_post_request = lte.request().await?;
+    multi_post_request.set_url("http://api.solar.bockmattli.ch/api/v1/solar").await?;
+    multi_post_request.body().write_all(b"<one>").await?;
+    multi_post_request.body().write_all(b"<two>").await?;
+    multi_post_request.body().write_all(b"<three>").await?;
+    let mut post_response = multi_post_request.post().await?;
+    info!("http post done: status={:?} len={}", post_response.status(), post_response.body().len());
+    if post_response.status().is_ok() {
+        let mut buf = [0u8; 1024];
+        loop {
+            let n = post_response.body().read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            info!("read {} bytes", n);
+        }
+        let response = core::str::from_utf8(&buf).map_err(|_| {
+            error!("http post body not utf8");
+            CellularError::AtError(bt_core::at::AtError::Error)
+        })?;
+        info!("http post body: '{}'", response);
+    } else {
+        error!("http post failed: code={}", post_response.status());
+    }
+
     info!("wait 10s before power off ...");
     Timer::after_secs(10).await;
     info!("... power off ...");
