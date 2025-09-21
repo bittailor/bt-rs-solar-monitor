@@ -30,3 +30,13 @@ impl From<embassy_time::TimeoutError> for CellularError {
         CellularError::Timeout
     }
 }
+
+impl embedded_io_async::Error for CellularError {
+    fn kind(&self) -> embedded_io_async::ErrorKind {
+        match self {
+            CellularError::Timeout => embedded_io_async::ErrorKind::TimedOut,
+            CellularError::AtError(_) => embedded_io_async::ErrorKind::Other,
+            CellularError::GpioError => embedded_io_async::ErrorKind::Other,
+        }
+    }
+}

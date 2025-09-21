@@ -21,6 +21,7 @@ pub const ERROR_STRING_SIZE: usize = 64;
 const CHANNEL_SIZE: usize = 2;
 const AT_BUFFER_SIZE: usize = 256;
 const MAX_RESPONSE_LINES: usize = 8;
+pub const MAX_READ_BUFFER_SIZE: usize = AT_BUFFER_SIZE * MAX_RESPONSE_LINES;
 
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -53,30 +54,83 @@ impl From<CapacityError> for AtError {
 
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AtRequestMessage {
+pub struct AtCommandRequest {
     command: String<AT_BUFFER_SIZE>,
     timeout: Duration,
+    urc_prefix: Option<String<AT_BUFFER_SIZE>>,
 }
 
-impl AtRequestMessage {
+impl AtCommandRequest {
+    fn new(command: String<AT_BUFFER_SIZE>) -> Self {
+        AtCommandRequest {
+            command,
+            timeout: Duration::from_secs(5),
+            urc_prefix: None,
+        }
+    }
+
     fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
-    async fn send(self, client: &impl AtClient) -> Result<AtResponseMessage, AtError> {
-        client.send(self).await;
-        client.receive().await
+    fn with_urc_prefix(mut self, urc_prefix: String<AT_BUFFER_SIZE>) -> Self {
+        self.urc_prefix = Some(urc_prefix);
+        self
+    }
+
+    async fn send(self, client: &impl AtClient) -> Result<AtCommandResponse, AtError> {
+        client.send(AtRequestMessage::Command(self)).await;
+        let response = match client.receive().await? {
+            AtResponseMessage::Command(response) => response,
+            AtResponseMessage::Read(_) => {
+                error!("Unexpected 'Read' response instead of 'Command' response");
+                return Err(AtError::Error);
+            }
+        };
+        Ok(response)
     }
 }
 
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AtResponseMessage {
+pub struct AtHttpReadRequest {
+    offset: usize,
+    len: usize,
+}
+
+impl AtHttpReadRequest {
+    pub fn new(offset: usize, len: usize) -> Self {
+        Self { offset, len }
+    }
+
+    pub async fn send(self, client: &impl AtClient) -> Result<AtHttpReadResponse, AtError> {
+        client.send(AtRequestMessage::Read(self)).await;
+        let response = match client.receive().await? {
+            AtResponseMessage::Read(response) => response,
+            AtResponseMessage::Command(_) => {
+                error!("Unexpected 'Command' response instead of 'Read' response");
+                return Err(AtError::Error);
+            }
+        };
+        Ok(response)
+    }
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Eq, PartialEq)]
+pub enum AtRequestMessage {
+    Command(AtCommandRequest),
+    Read(AtHttpReadRequest),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct AtCommandResponse {
     lines: Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>,
 }
 
-impl AtResponseMessage {
+impl AtCommandResponse {
     pub fn new(lines: Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>) -> Self {
         Self { lines }
     }
@@ -98,6 +152,43 @@ impl AtResponseMessage {
             actual: self.lines.len(),
         })
     }
+}
+
+impl Default for AtCommandResponse {
+    fn default() -> Self {
+        Self { lines: Vec::new() }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct AtHttpReadResponse {
+    data: Vec<u8, MAX_READ_BUFFER_SIZE>,
+}
+
+impl AtHttpReadResponse {
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, AtError> {
+        if buf.len() < self.data.len() {
+            return Err(AtError::CapacityError);
+        }
+        let len = core::cmp::min(buf.len(), self.data.len());
+        buf[..len].copy_from_slice(&self.data[..len]);
+        self.data.clear();
+        Ok(len)
+    }
+}
+
+impl Default for AtHttpReadResponse {
+    fn default() -> Self {
+        Self { data: Vec::new() }
+    }
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Eq, PartialEq)]
+pub enum AtResponseMessage {
+    Command(AtCommandResponse),
+    Read(AtHttpReadResponse),
 }
 
 pub struct State {
@@ -153,7 +244,7 @@ impl<'ch> AtClient for AtClientImpl<'ch> {
 macro_rules! at_request {
     ($s:literal $(, $x:expr)* $(,)?) => {{
         let req_str = heapless::format!($s $(, $x)*)?;
-        $crate::at::AtRequestMessage { command: req_str, timeout: embassy_time::Duration::from_secs(5) }
+        $crate::at::AtCommandRequest::new(req_str)
     }};
 }
 
@@ -184,16 +275,31 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
     pub async fn run(mut self) {
         loop {
             match select(self.receiver.receive(), self.at_controller.poll_urc()).await {
-                embassy_futures::select::Either::First(cmd) => {
-                    let response = self.send_command(cmd).await;
-                    self.sender.send(response).await;
-                }
+                embassy_futures::select::Either::First(request) => match request {
+                    AtRequestMessage::Command(cmd) => {
+                        let mut response = self.send_command(&cmd).await;
+                        if let Ok(ref mut command_response) = response
+                            && let Some(prefix) = cmd.urc_prefix
+                            && let Err(e) = self.read_line_until_urc(prefix.as_str(), cmd.timeout, &mut command_response.lines).await
+                        {
+                            response = Err(e);
+                        }
+                        self.sender.send(response.map(AtResponseMessage::Command)).await;
+                    }
+                    AtRequestMessage::Read(read) => {
+                        let mut response = AtHttpReadResponse::default();
+                        response.data.resize(read.len, 0).unwrap();
+                        self.http_read(read, &mut response.data).await.unwrap();
+
+                        self.sender.send(Ok(AtResponseMessage::Read(response))).await;
+                    }
+                },
                 embassy_futures::select::Either::Second(urc) => self.handle_urc(urc).await,
             };
         }
     }
 
-    async fn send_command(&mut self, command: AtRequestMessage) -> Result<AtResponseMessage, AtError> {
+    async fn send_command(&mut self, command: &AtCommandRequest) -> Result<AtCommandResponse, AtError> {
         if let Err(_e) = self.at_controller.stream.write_all(command.command.as_bytes()).await {
             error!("Failed to send command: {}", command.command);
             return Err(AtError::Error);
@@ -203,45 +309,126 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
             return Err(AtError::Error);
         }
         info!("UART.TX> {}", command.command);
+        let mut response = AtCommandResponse::default();
+        self.read_command_response_lines(command.command.as_str(), command.timeout, &mut response.lines)
+            .await?;
+        Ok(response)
+    }
 
-        let mut lines = Vec::<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>::new();
-
-        match with_timeout(command.timeout, async {
+    async fn read_command_response_lines(
+        &mut self,
+        command: &str,
+        timeout: Duration,
+        lines: &mut Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>,
+    ) -> Result<(), AtError> {
+        match with_timeout(timeout, async {
             loop {
                 let line = self.at_controller.read_line().await;
                 if line == "OK" {
                     info!("Command success => {} response lines", lines.len());
-                    break Ok(lines);
+                    break Ok(());
                 } else if line == "ERROR" {
                     warn!("Command error => {} response lines", lines.len());
                     break Err(AtError::Error);
                 } else {
-                    if lines.is_empty() && line == command.command {
+                    if lines.is_empty() && line == command {
                         trace!("Skipping echo line");
                         continue; // skip echo line
                     }
                     info!(" R<{}> {}", lines.len(), line.as_str());
-                    match lines.push(line) {
-                        Ok(_) => {}
-                        Err(_) => {
-                            error!("Response buffer full");
-                            break Err(AtError::Error);
-                        }
-                    }
+                    lines.push(line).map_err(|_| AtError::CapacityError)?;
                 }
             }
         })
         .await
         {
-            Ok(response) => {
-                info!("Command '{}' => completed", command.command);
-                response.map(AtResponseMessage::new)
+            Ok(Ok(l)) => {
+                info!("Command '{}' => completed", command);
+                Ok(l)
+            }
+            Ok(Err(e)) => {
+                error!("Command '{}' => error", command);
+                Err(e)
             }
             Err(_e) => {
-                error!("Command '{}' => timeout", command.command);
+                error!("Command '{}' => timeout", command);
                 Err(AtError::Timeout)
             }
         }
+    }
+
+    async fn read_line_until_urc(
+        &mut self,
+        prefix: &str,
+        timeout: Duration,
+        lines: &mut Vec<String<AT_BUFFER_SIZE>, MAX_RESPONSE_LINES>,
+    ) -> Result<(), AtError> {
+        match with_timeout(timeout, async {
+            loop {
+                let line = self.at_controller.read_line().await;
+                let prefix_match = line.starts_with(prefix);
+                lines.push(line).map_err(|_| AtError::CapacityError)?;
+                if prefix_match {
+                    info!("Found URC prefix '{}'", prefix);
+                    break Ok(());
+                }
+            }
+        })
+        .await
+        {
+            Ok(Ok(l)) => {
+                info!("urc '{}' => completed", prefix);
+                Ok(l)
+            }
+            Ok(Err(e)) => {
+                error!("urc '{}' => error", prefix);
+                Err(e)
+            }
+            Err(_e) => {
+                error!("urc '{}' => timeout", prefix);
+                Err(AtError::Timeout)
+            }
+        }
+
+        /*
+
+        match response {
+            Ok(mut response_msg) => loop {
+                let line = self.at_controller.read_line().await;
+                if line.is_empty() {
+                    warn!("Empty URC line");
+                    continue;
+                }
+                let found = line.starts_with(prefix.as_str());
+
+                match response_msg.lines.push(line) {
+                    Ok(_) => {}
+                    Err(_) => {
+                        return Err(AtError::Error);
+                    }
+                }
+                if found {
+                    return Ok(response_msg);
+                }
+            },
+            Err(_) => response,
+        }
+        */
+    }
+
+    async fn http_read(&mut self, read: AtHttpReadRequest, buf: &mut [u8]) -> Result<usize, AtError> {
+        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPREAD={},{}", &read.offset, &read.len)?;
+        self.at_controller.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
+        self.at_controller.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
+
+        let mut lines = heapless::Vec::new();
+        self.read_command_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
+        lines.clear();
+        let start_tag = heapless::format!(AT_BUFFER_SIZE; "+HTTPREAD: {}", &read.len)?;
+        self.read_line_until_urc(start_tag.as_str(), Duration::from_secs(120), &mut lines).await?;
+        self.at_controller.stream.read_exact(&mut buf[0..read.len]).await.map_err(|_| AtError::Error)?;
+        self.read_line_until_urc("+HTTPREAD: 0", Duration::from_secs(120), &mut lines).await?;
+        Ok(read.len)
     }
 
     async fn handle_urc(&mut self, urc: String<AT_BUFFER_SIZE>) {
@@ -271,9 +458,18 @@ impl<S: Read + Write> AtController<S> {
     async fn read_line(&mut self) -> String<AT_BUFFER_SIZE> {
         loop {
             let mut char_buf = [0u8; 1];
+            let mut have_cr = false;
             match self.stream.read(&mut char_buf).await {
                 Ok(_) => {
-                    if char_buf[0] == b'\n' || char_buf[0] == b'\r' {
+                    if char_buf[0] == b'\r' {
+                        have_cr = true;
+                        continue;
+                    }
+                    if char_buf[0] == b'\n' {
+                        if !have_cr {
+                            warn!("Line feed without preceding carriage return");
+                        }
+                        have_cr = false;
                         trace!("UART.RX line of lenght {}", self.line_buffer.len());
                         if !self.line_buffer.is_empty() {
                             match String::from_utf8(replace(&mut self.line_buffer, heapless::Vec::new())) {
@@ -297,10 +493,9 @@ impl<S: Read + Write> AtController<S> {
 
 #[cfg(test)]
 pub mod mocks {
-    use crate::at::{AT_BUFFER_SIZE, AtError, MAX_RESPONSE_LINES};
+    use super::*;
+    use crate::at::{AT_BUFFER_SIZE, AtCommandResponse, AtError, MAX_RESPONSE_LINES};
     use core::cell::RefCell;
-
-    use super::{AtClient, AtRequestMessage, AtResponseMessage};
 
     pub struct AtClientMock {
         request: AtRequestMessage,
@@ -333,11 +528,8 @@ pub mod mocks {
         }
 
         AtClientMock::new(
-            AtRequestMessage {
-                command: heapless::String::try_from(command).unwrap(),
-                timeout: embassy_time::Duration::from_secs(5),
-            },
-            AtResponseMessage::new(lines),
+            AtRequestMessage::Command(AtCommandRequest::new(heapless::String::<AT_BUFFER_SIZE>::try_from(command).unwrap())),
+            AtResponseMessage::Command(AtCommandResponse::new(lines)),
         )
     }
 }

@@ -11,6 +11,7 @@ use embassy_rp::peripherals::UART0;
 use embassy_rp::uart::{self, BufferedInterruptHandler, BufferedUart};
 use embassy_time::Timer;
 use embedded_hal::digital::OutputPin;
+use embedded_io_async::Read;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -57,7 +58,7 @@ async fn main(_spawner: Spawner) {
 }
 
 async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin>) -> Result<(), CellularError> {
-    lte.power_on().await?;
+    lte.power_cycle().await?;
 
     lte.set_apn("gprs.swisscom.ch").await?;
 
@@ -68,8 +69,31 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     }
     info!("network registered!");
 
+    let request = lte.request().await?;
+    request.set_url("http://api.solar.bockmattli.ch/api/v1/solar").await?;
+    let (code, mut body) = request.get().await?;
+    info!("http get done: code={:?} len={}", code, body.len());
+    if code.is_ok() {
+        let mut buf = [0u8; 1024];
+        loop {
+            let n = body.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            info!("read {} bytes", n);
+        }
+        let response = core::str::from_utf8(&buf).map_err(|e| {
+            error!("http get body not utf8");
+            CellularError::AtError(bt_core::at::AtError::Error)
+        })?;
+        info!("http get body: {}", response);
+    } else {
+        error!("http get failed: code={}", code);
+    }
+
+    info!("wait 10s before power off ...");
     Timer::after_secs(10).await;
-    info!("power off ...");
+    info!("... power off ...");
     lte.power_down().await?;
     info!("... power off done");
 
