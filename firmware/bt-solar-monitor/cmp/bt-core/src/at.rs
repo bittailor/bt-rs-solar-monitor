@@ -378,7 +378,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
     ) -> Result<(), AtError> {
         match with_timeout(timeout, async {
             loop {
-                let line = self.at_controller.read_line().await;
+                let line = self.at_controller.read_line().await?;
                 if line == "OK" {
                     debug!("OK => success => {} response lines", lines.len());
                     break Ok(());
@@ -423,7 +423,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
     ) -> Result<(), AtError> {
         match with_timeout(timeout, async {
             loop {
-                let line = self.at_controller.read_line().await;
+                let line = self.at_controller.read_line().await?;
                 let prefix_match = line.starts_with(prefix);
                 lines.push(line).map_err(|_| AtError::CapacityError)?;
                 if prefix_match {
@@ -521,12 +521,20 @@ impl<S: Read + Write> AtController<S> {
     }
 
     async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE> {
-        let urc_line = self.read_line().await;
-        debug!("URC.RX> {}", urc_line.as_str());
-        urc_line
+        loop {
+            match self.read_line().await {
+                Ok(urc_line) => {
+                    debug!("URC.RX> {}", urc_line.as_str());
+                    return urc_line;
+                }
+                Err(_) => {
+                    warn!("read error while urc polling => ignore");
+                }
+            }
+        }
     }
 
-    async fn read_line(&mut self) -> String<AT_BUFFER_SIZE> {
+    async fn read_line(&mut self) -> Result<String<AT_BUFFER_SIZE>, AtError> {
         let mut have_cr = false;
         loop {
             let mut char_buf = [0u8; 1];
@@ -546,14 +554,14 @@ impl<S: Read + Write> AtController<S> {
                             match String::from_utf8(replace(&mut self.line_buffer, heapless::Vec::new())) {
                                 Ok(line) => {
                                     debug!("UART.RX> {}", line.as_str());
-                                    return line;
+                                    return Ok(line);
                                 }
                                 Err(_) => error!("Invalid UTF-8 sequence"),
                             }
                             self.line_buffer.clear();
                         }
                     } else {
-                        self.line_buffer.push(char_buf[0]).unwrap();
+                        self.line_buffer.push(char_buf[0]).map_err(|_| AtError::CapacityError)?;
                     }
                 }
                 Err(_e) => warn!("Read error"),
