@@ -321,25 +321,16 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
             match select(self.receiver.receive(), self.at_controller.poll_urc()).await {
                 embassy_futures::select::Either::First(request) => match request {
                     AtRequestMessage::Command(cmd) => {
-                        let mut response = self.send_command(&cmd).await;
-                        if let Ok(ref mut command_response) = response
-                            && let Some(prefix) = cmd.urc_prefix
-                            && let Err(e) = self.read_line_until_urc(prefix.as_str(), cmd.timeout, &mut command_response.lines).await
-                        {
-                            response = Err(e);
-                        }
+                        let response = self.handle_command(&cmd).await;
                         self.sender.send(response.map(AtResponseMessage::Command)).await;
                     }
                     AtRequestMessage::Read(read) => {
-                        let mut response = AtHttpReadResponse::default();
-                        response.data.resize(read.len, 0).unwrap();
-                        self.http_read(read, &mut response.data).await.unwrap();
-
-                        self.sender.send(Ok(AtResponseMessage::Read(response))).await;
+                        let response = self.handle_http_read(&read).await;
+                        self.sender.send(response.map(AtResponseMessage::Read)).await;
                     }
                     AtRequestMessage::Write(write) => {
-                        self.http_write(&write.data).await.unwrap();
-                        self.sender.send(Ok(AtResponseMessage::Write(AtHttpWriteResponse {}))).await;
+                        let response = self.handle_http_write(&write).await;
+                        self.sender.send(response.map(AtResponseMessage::Write)).await;
                     }
                 },
                 embassy_futures::select::Either::Second(urc) => self.handle_urc(urc).await,
@@ -347,23 +338,39 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         }
     }
 
-    async fn send_command(&mut self, command: &AtCommandRequest) -> Result<AtCommandResponse, AtError> {
-        if let Err(_e) = self.at_controller.stream.write_all(command.command.as_bytes()).await {
-            error!("Failed to send command: {}", command.command);
+    async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError> {
+        if let Err(_e) = self.at_controller.stream.write_all(cmd.command.as_bytes()).await {
+            error!("Failed to send command: {}", cmd.command);
             return Err(AtError::Error);
         }
         if let Err(_e) = self.at_controller.stream.write_all(b"\r\n").await {
-            error!("Failed to send command: {}", command.command);
+            error!("Failed to send command: {}", cmd.command);
             return Err(AtError::Error);
         }
-        info!("UART.TX> {}", command.command);
+        info!("UART.TX> {}", cmd.command);
         let mut response = AtCommandResponse::default();
-        self.read_command_response_lines(command.command.as_str(), command.timeout, &mut response.lines)
-            .await?;
+        self.read_response_lines(cmd.command.as_str(), cmd.timeout, &mut response.lines).await?;
+
+        if let Some(prefix) = &cmd.urc_prefix {
+            self.read_line_until_urc(prefix.as_str(), cmd.timeout, &mut response.lines).await?;
+        }
+        debug!("'{}' => completed with {:?}", cmd.command, response);
         Ok(response)
     }
 
-    async fn read_command_response_lines(
+    async fn handle_http_read(&mut self, read: &AtHttpReadRequest) -> Result<AtHttpReadResponse, AtError> {
+        let mut response = AtHttpReadResponse::default();
+        response.data.resize(read.len, 0)?;
+        self.http_read(read, &mut response.data).await?;
+        Ok(response)
+    }
+
+    async fn handle_http_write(&mut self, write: &AtHttpWriteRequest) -> Result<AtHttpWriteResponse, AtError> {
+        self.http_write(&write.data).await?;
+        Ok(AtHttpWriteResponse {})
+    }
+
+    async fn read_response_lines(
         &mut self,
         command: &str,
         timeout: Duration,
@@ -373,20 +380,20 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
             loop {
                 let line = self.at_controller.read_line().await;
                 if line == "OK" {
-                    info!("OK => command success => {} response lines", lines.len());
+                    debug!("OK => success => {} response lines", lines.len());
                     break Ok(());
                 } else if line == "DOWNLOAD" {
-                    info!("DOWNLOAD => command success => {} response lines", lines.len());
+                    debug!("DOWNLOAD => success => {} response lines", lines.len());
                     break Ok(());
                 } else if line == "ERROR" {
-                    warn!("ERROR => command error => {} response lines", lines.len());
+                    warn!("ERROR => error => {} response lines", lines.len());
                     break Err(AtError::Error);
                 } else {
-                    if lines.is_empty() && line == command {
+                    if line == command {
                         trace!("Skipping echo line");
-                        continue; // skip echo line
+                        continue;
                     }
-                    info!(" R<{}> {}", lines.len(), line.as_str());
+                    debug!(" R[{}] {}", lines.len(), line.as_str());
                     lines.push(line).map_err(|_| AtError::CapacityError)?;
                 }
             }
@@ -394,15 +401,15 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         .await
         {
             Ok(Ok(l)) => {
-                info!("Command '{}' => completed", command);
+                debug!("'{}' => completed", command);
                 Ok(l)
             }
             Ok(Err(e)) => {
-                error!("Command '{}' => error", command);
+                error!("'{}' => error", command);
                 Err(e)
             }
             Err(_e) => {
-                error!("Command '{}' => timeout", command);
+                error!("'{}' => timeout", command);
                 Err(AtError::Timeout)
             }
         }
@@ -420,7 +427,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
                 let prefix_match = line.starts_with(prefix);
                 lines.push(line).map_err(|_| AtError::CapacityError)?;
                 if prefix_match {
-                    info!("Found URC prefix '{}'", prefix);
+                    debug!("Found URC prefix '{}'", prefix);
                     break Ok(());
                 }
             }
@@ -428,7 +435,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         .await
         {
             Ok(Ok(l)) => {
-                info!("urc '{}' => completed", prefix);
+                debug!("urc '{}' => completed", prefix);
                 Ok(l)
             }
             Ok(Err(e)) => {
@@ -467,13 +474,13 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         */
     }
 
-    async fn http_read(&mut self, read: AtHttpReadRequest, buf: &mut [u8]) -> Result<usize, AtError> {
+    async fn http_read(&mut self, read: &AtHttpReadRequest, buf: &mut [u8]) -> Result<usize, AtError> {
         let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPREAD={},{}", &read.offset, &read.len)?;
         self.at_controller.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
         self.at_controller.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
 
         let mut lines = heapless::Vec::new();
-        self.read_command_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
+        self.read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
         lines.clear();
         let start_tag = heapless::format!(AT_BUFFER_SIZE; "+HTTPREAD: {}", &read.len)?;
         self.read_line_until_urc(start_tag.as_str(), Duration::from_secs(120), &mut lines).await?;
@@ -488,10 +495,10 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         self.at_controller.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
 
         let mut lines = heapless::Vec::new();
-        self.read_command_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
+        self.read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
         lines.clear();
         self.at_controller.stream.write_all(buf).await.map_err(|_| AtError::Error)?;
-        self.read_command_response_lines("", Duration::from_secs(10), &mut lines).await?;
+        self.read_response_lines("", Duration::from_secs(10), &mut lines).await?;
         Ok(buf.len())
     }
 
