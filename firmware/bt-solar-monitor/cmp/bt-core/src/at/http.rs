@@ -11,6 +11,7 @@ pub enum HttpAction {
     Delete = 3,
 }
 
+#[derive(Debug, Copy, Clone)]
 pub struct HttpStatusCode(u32);
 
 impl HttpStatusCode {

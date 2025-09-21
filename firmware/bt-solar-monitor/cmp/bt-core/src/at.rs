@@ -87,6 +87,10 @@ impl AtCommandRequest {
                 error!("Unexpected 'Read' response instead of 'Command' response");
                 return Err(AtError::Error);
             }
+            AtResponseMessage::Write(_) => {
+                error!("Unexpected 'Write' response instead of 'Command' response");
+                return Err(AtError::Error);
+            }
         };
         Ok(response)
     }
@@ -112,8 +116,42 @@ impl AtHttpReadRequest {
                 error!("Unexpected 'Command' response instead of 'Read' response");
                 return Err(AtError::Error);
             }
+            AtResponseMessage::Write(_) => {
+                error!("Unexpected 'Write' response instead of 'Read' response");
+                return Err(AtError::Error);
+            }
         };
         Ok(response)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct AtHttpWriteRequest {
+    data: Vec<u8, MAX_READ_BUFFER_SIZE>,
+}
+
+impl AtHttpWriteRequest {
+    pub fn new(data: &[u8]) -> Result<Self, AtError> {
+        let mut vec = Vec::<u8, MAX_READ_BUFFER_SIZE>::new();
+        vec.extend_from_slice(data)?;
+        Ok(Self { data: vec })
+    }
+
+    pub async fn send(self, client: &impl AtClient) -> Result<(), AtError> {
+        client.send(AtRequestMessage::Write(self)).await;
+        match client.receive().await? {
+            AtResponseMessage::Write(response) => response,
+            AtResponseMessage::Read(_) => {
+                error!("Unexpected 'Read' response instead of 'Write' response");
+                return Err(AtError::Error);
+            }
+            AtResponseMessage::Command(_) => {
+                error!("Unexpected 'Command' response instead of 'Write' response");
+                return Err(AtError::Error);
+            }
+        };
+        Ok(())
     }
 }
 
@@ -122,6 +160,7 @@ impl AtHttpReadRequest {
 pub enum AtRequestMessage {
     Command(AtCommandRequest),
     Read(AtHttpReadRequest),
+    Write(AtHttpWriteRequest),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -184,11 +223,16 @@ impl Default for AtHttpReadResponse {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct AtHttpWriteResponse {}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Eq, PartialEq)]
 pub enum AtResponseMessage {
     Command(AtCommandResponse),
     Read(AtHttpReadResponse),
+    Write(AtHttpWriteResponse),
 }
 
 pub struct State {
@@ -293,6 +337,10 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
 
                         self.sender.send(Ok(AtResponseMessage::Read(response))).await;
                     }
+                    AtRequestMessage::Write(write) => {
+                        self.http_write(&write.data).await.unwrap();
+                        self.sender.send(Ok(AtResponseMessage::Write(AtHttpWriteResponse {}))).await;
+                    }
                 },
                 embassy_futures::select::Either::Second(urc) => self.handle_urc(urc).await,
             };
@@ -325,10 +373,13 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
             loop {
                 let line = self.at_controller.read_line().await;
                 if line == "OK" {
-                    info!("Command success => {} response lines", lines.len());
+                    info!("OK => command success => {} response lines", lines.len());
+                    break Ok(());
+                } else if line == "DOWNLOAD" {
+                    info!("DOWNLOAD => command success => {} response lines", lines.len());
                     break Ok(());
                 } else if line == "ERROR" {
-                    warn!("Command error => {} response lines", lines.len());
+                    warn!("ERROR => command error => {} response lines", lines.len());
                     break Err(AtError::Error);
                 } else {
                     if lines.is_empty() && line == command {
@@ -431,6 +482,19 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         Ok(read.len)
     }
 
+    async fn http_write(&mut self, buf: &[u8]) -> Result<usize, AtError> {
+        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPDATA={},{}", &buf.len(), 60)?;
+        self.at_controller.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
+        self.at_controller.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
+
+        let mut lines = heapless::Vec::new();
+        self.read_command_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
+        lines.clear();
+        self.at_controller.stream.write_all(buf).await.map_err(|_| AtError::Error)?;
+        self.read_command_response_lines("", Duration::from_secs(10), &mut lines).await?;
+        Ok(buf.len())
+    }
+
     async fn handle_urc(&mut self, urc: String<AT_BUFFER_SIZE>) {
         info!("Handling URC: {}", urc.as_str());
     }
@@ -456,9 +520,9 @@ impl<S: Read + Write> AtController<S> {
     }
 
     async fn read_line(&mut self) -> String<AT_BUFFER_SIZE> {
+        let mut have_cr = false;
         loop {
             let mut char_buf = [0u8; 1];
-            let mut have_cr = false;
             match self.stream.read(&mut char_buf).await {
                 Ok(_) => {
                     if char_buf[0] == b'\r' {

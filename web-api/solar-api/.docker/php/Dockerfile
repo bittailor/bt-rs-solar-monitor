@@ -18,7 +18,7 @@ RUN pecl install xdebug \
 
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
 
-RUN a2enmod rewrite && a2enmod negotiation
+RUN a2enmod rewrite && a2enmod negotiation && a2enmod headers
 
 ENV APACHE_DOCUMENT_ROOT="/var/workspace/bt-rs-solar-monitor/web-api/solar-api/public"
 

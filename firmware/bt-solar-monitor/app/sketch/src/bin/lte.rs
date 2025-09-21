@@ -11,7 +11,7 @@ use embassy_rp::peripherals::UART0;
 use embassy_rp::uart::{self, BufferedInterruptHandler, BufferedUart};
 use embassy_time::Timer;
 use embedded_hal::digital::OutputPin;
-use embedded_io_async::Read;
+use embedded_io_async::{Read, Write};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -69,26 +69,52 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     }
     info!("network registered!");
 
-    let request = lte.request().await?;
-    request.set_url("http://api.solar.bockmattli.ch/api/v1/solar").await?;
-    let (code, mut body) = request.get().await?;
-    info!("http get done: code={:?} len={}", code, body.len());
-    if code.is_ok() {
+    let get_request = lte.request().await?;
+    get_request.set_url("http://api.solar.bockmattli.ch/api/v1/solar").await?;
+    let mut get_response = get_request.get().await?;
+    info!("http get done: status={:?} len={}", get_response.status(), get_response.body().len());
+    if get_response.status().is_ok() {
         let mut buf = [0u8; 1024];
         loop {
-            let n = body.read(&mut buf).await?;
+            let n = get_response.body().read(&mut buf).await?;
             if n == 0 {
                 break;
             }
             info!("read {} bytes", n);
         }
-        let response = core::str::from_utf8(&buf).map_err(|e| {
+        let response = core::str::from_utf8(&buf).map_err(|_| {
             error!("http get body not utf8");
             CellularError::AtError(bt_core::at::AtError::Error)
         })?;
-        info!("http get body: {}", response);
+        info!("http get body: '{}'", response);
     } else {
-        error!("http get failed: code={}", code);
+        error!("http get failed: code={}", get_response.status());
+    }
+
+    let post_request = lte.request().await?;
+    post_request.set_url("http://api.solar.bockmattli.ch/api/v1/solar").await?;
+    post_request
+        .body()
+        .write_all(b"{\"device\":\"test-device\",\"power\":123,\"energy\":456}")
+        .await?;
+    let mut post_response = post_request.post().await?;
+    info!("http post done: status={:?} len={}", post_response.status(), post_response.body().len());
+    if post_response.status().is_ok() {
+        let mut buf = [0u8; 1024];
+        loop {
+            let n = post_response.body().read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            info!("read {} bytes", n);
+        }
+        let response = core::str::from_utf8(&buf).map_err(|_| {
+            error!("http post body not utf8");
+            CellularError::AtError(bt_core::at::AtError::Error)
+        })?;
+        info!("http post body: '{}'", response);
+    } else {
+        error!("http post failed: code={}", post_response.status());
     }
 
     info!("wait 10s before power off ...");
