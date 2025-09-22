@@ -2,8 +2,26 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"type": "vscode-just",
+			"task": "just",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": [
+				"$rustc"
+			],
+			"presentation": {
+				"clear": true
+			},
+			"label": "just"
+		},
+		{
 			"type": "cargo",
 			"command": "build",
+			"dependsOn": [
+				"rust: cargo host tests"
+			],
 			"args": [
 				"--release"
 			],
@@ -12,7 +30,6 @@
 			],
 			"group": {
 				"kind": "build",
-				"isDefault": true
 			},
 			"presentation": {
 				"clear": true
@@ -32,6 +49,28 @@
 				"clear": true
 			},
 			"label": "rust: cargo build debug"
+		},
+		{
+			"type": "cargo",
+			"command": "test",
+			"args": [
+				"--target",
+				"aarch64-apple-darwin",
+				"--workspace",
+				"--exclude",
+				"sketch"
+			],
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "test",
+				"isDefault": true
+			},
+			"presentation": {
+				"clear": true
+			},
+			"label": "rust: cargo host tests"
 		}
 	]
 }

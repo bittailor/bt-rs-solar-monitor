@@ -30,15 +30,7 @@ async fn main(spawner: Spawner) {
     let tx_buf = &mut TX_BUF.init([0; 128])[..];
     static RX_BUF: StaticCell<[u8; 128]> = StaticCell::new();
     let rx_buf = &mut RX_BUF.init([0; 128])[..];
-    let uart = BufferedUart::new(
-        uart,
-        tx_pin,
-        rx_pin,
-        Irqs,
-        tx_buf,
-        rx_buf,
-        Config::default(),
-    );
+    let uart = BufferedUart::new(uart, tx_pin, rx_pin, Irqs, tx_buf, rx_buf, Config::default());
     let (mut tx, rx) = uart.split();
 
     unwrap!(spawner.spawn(reader(rx)));
@@ -53,9 +45,6 @@ async fn main(spawner: Spawner) {
         tx.write_all(&data).await.unwrap();
         Timer::after_secs(2).await;
     }
-
-
-    
 }
 
 #[embassy_executor::task]
@@ -69,7 +58,7 @@ async fn reader(mut rx: BufferedUartRx) {
                 Ok(_) => {
                     if char_buf[0] == b'\n' || char_buf[0] == b'\r' {
                         info!("Got line of {}", line_buffer.len());
-                        if line_buffer.len() > 0 {
+                        if !line_buffer.is_empty() {
                             match str::from_utf8(&line_buffer) {
                                 Ok(line) => info!("RX: '{}'", line),
                                 Err(_) => error!("Invalid UTF-8 sequence"),

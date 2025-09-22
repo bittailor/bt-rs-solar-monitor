@@ -1,0 +1,13 @@
+default: clippy host_test build
+
+clippy:
+    cargo clippy
+
+host_test:
+    cargo test --target aarch64-apple-darwin --workspace --exclude sketch
+
+build:
+    cargo build --release
+
+run:
+    cargo run --release --bin lte

@@ -71,15 +71,7 @@ async fn main(_spawner: Spawner) {
     let tx_buf = &mut TX_BUF.init([0; 16])[..];
     static RX_BUF: StaticCell<[u8; 16]> = StaticCell::new();
     let rx_buf = &mut RX_BUF.init([0; 16])[..];
-    let uart = uart::BufferedUart::new(
-        uart,
-        tx_pin,
-        rx_pin,
-        Irqs,
-        tx_buf,
-        rx_buf,
-        uart::Config::default(),
-    );
+    let uart = uart::BufferedUart::new(uart, tx_pin, rx_pin, Irqs, tx_buf, rx_buf, uart::Config::default());
     let (mut uart_tx, mut uart_rx) = uart.split();
 
     // Pipe setup
@@ -97,20 +89,13 @@ async fn main(_spawner: Spawner) {
             info!("Wait for USB connection");
             usb_rx.wait_connection().await;
             info!("Connected");
-            let _ = join(
-                usb_read(&mut usb_rx, &mut uart_pipe_writer),
-                usb_write(&mut usb_tx, &mut usb_pipe_reader),
-            )
-            .await;
+            let _ = join(usb_read(&mut usb_rx, &mut uart_pipe_writer), usb_write(&mut usb_tx, &mut usb_pipe_reader)).await;
             info!("Disconnected");
         }
     };
 
     // Read + write from UART
-    let uart_future = join(
-        uart_read(&mut uart_rx, &mut usb_pipe_writer),
-        uart_write(&mut uart_tx, &mut uart_pipe_reader),
-    );
+    let uart_future = join(uart_read(&mut uart_rx, &mut usb_pipe_writer), uart_write(&mut uart_tx, &mut uart_pipe_reader));
 
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.
@@ -152,15 +137,12 @@ async fn usb_write<'d, T: Instance + 'd>(
         let n = (*usb_pipe_reader).read(&mut buf).await;
         let data = &buf[..n];
         trace!("USB OUT: {:x}", data);
-        usb_tx.write_packet(&data).await?;
+        usb_tx.write_packet(data).await?;
     }
 }
 
 /// Read from the UART and write it to the USB TX pipe
-async fn uart_read(
-    uart_rx: &mut uart::BufferedUartRx,
-    usb_pipe_writer: &mut embassy_sync::pipe::Writer<'_, NoopRawMutex, 20>,
-) -> ! {
+async fn uart_read(uart_rx: &mut uart::BufferedUartRx, usb_pipe_writer: &mut embassy_sync::pipe::Writer<'_, NoopRawMutex, 20>) -> ! {
     let mut buf = [0; 64];
     loop {
         let n = uart_rx.read(&mut buf).await.expect("UART read error");
@@ -174,15 +156,12 @@ async fn uart_read(
 }
 
 /// Read from the UART TX pipe and write it to the UART
-async fn uart_write(
-    uart_tx: &mut uart::BufferedUartTx,
-    uart_pipe_reader: &mut embassy_sync::pipe::Reader<'_, NoopRawMutex, 20>,
-) -> ! {
+async fn uart_write(uart_tx: &mut uart::BufferedUartTx, uart_pipe_reader: &mut embassy_sync::pipe::Reader<'_, NoopRawMutex, 20>) -> ! {
     let mut buf = [0; 64];
     loop {
         let n = (*uart_pipe_reader).read(&mut buf).await;
         let data = &buf[..n];
         trace!("UART OUT: {:x}", data);
-        let _ = uart_tx.write(&data);
+        _ = uart_tx.write(data);
     }
 }
