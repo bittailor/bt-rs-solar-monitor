@@ -58,6 +58,8 @@ async fn main(_spawner: Spawner) {
 }
 
 async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin>) -> Result<(), CellularError> {
+    info!("start LTE sequence");
+
     lte.power_cycle().await?;
 
     lte.set_apn("gprs.swisscom.ch").await?;

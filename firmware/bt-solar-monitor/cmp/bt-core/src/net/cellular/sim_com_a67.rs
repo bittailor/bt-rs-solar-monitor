@@ -9,11 +9,11 @@ use crate::{
     net::cellular::CellularError,
 };
 
-pub struct State {
-    at_state: crate::at::State,
+pub struct State<Stream: Read + Write> {
+    at_state: crate::at::State<Stream>,
 }
 
-impl State {
+impl<Stream: Read + Write> State<Stream> {
     pub fn new() -> Self {
         Self {
             at_state: crate::at::State::new(),
@@ -21,21 +21,22 @@ impl State {
     }
 }
 
-impl Default for State {
+impl<Stream: Read + Write> Default for State<Stream> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 pub async fn new<'a, S: Read + Write, Output: OutputPin>(
-    state: &'a mut State,
+    state: &'a mut State<S>,
     stream: S,
     pwrkey: Output,
     reset: Output,
 ) -> (CellularModule<'a, Output>, crate::at::Runner<'a, S>) {
-    let runner = crate::at::Runner::new(stream, state.at_state.tx_channel.receiver(), state.at_state.rx_channel.sender());
+    let (runner, tx, rx) = crate::at::new(&mut state.at_state, stream).await;
+
     let lte = CellularModule {
-        at_client: crate::at::AtClientImpl::new(state.at_state.tx_channel.sender(), state.at_state.rx_channel.receiver()),
+        at_client: crate::at::AtClientImpl::new(tx, rx),
         pwrkey,
         reset,
         http_initialized: false,
