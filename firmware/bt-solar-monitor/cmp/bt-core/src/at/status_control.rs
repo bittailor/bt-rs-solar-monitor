@@ -2,6 +2,7 @@ use crate::{
     at::{AtClient, AtError},
     at_request,
 };
+use embedded_io_async::{Read, Write};
 use heapless::format;
 use nom::{Parser, bytes::complete::tag};
 
@@ -28,7 +29,7 @@ impl From<Rssi> for i32 {
 
 // AT+CSQ
 // +CSQ: <rssi>,<ber>
-pub async fn query_signal_quality(ctr: &impl AtClient) -> Result<(Rssi, u32), AtError> {
+pub async fn query_signal_quality<'ch, Stream: Read + Write + 'ch>(ctr: &impl AtClient<'ch, Stream>) -> Result<(Rssi, u32), AtError> {
     let response = at_request!("AT+CSQ").send(ctr).await?;
     let (_, (_, raw_rssi, _, raw_ber)) = (tag("+CSQ: "), nom::character::complete::i32, tag(","), nom::character::complete::u32).parse(response.line(0)?)?;
     let rssi = match raw_rssi {
@@ -40,7 +41,7 @@ pub async fn query_signal_quality(ctr: &impl AtClient) -> Result<(Rssi, u32), At
 }
 
 // AT+CPOF
-pub async fn power_down(ctr: &impl AtClient) -> Result<(), AtError> {
+pub async fn power_down<'ch, Stream: Read + Write + 'ch>(ctr: &impl AtClient<'ch, Stream>) -> Result<(), AtError> {
     at_request!("AT+CPOF").send(ctr).await?;
     Ok(())
 }

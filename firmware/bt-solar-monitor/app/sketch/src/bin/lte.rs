@@ -57,7 +57,7 @@ async fn main(_spawner: Spawner) {
     join3(blinky, lte_runner.run(), sequenc).await;
 }
 
-async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin>) -> Result<(), CellularError> {
+async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin, impl Read + Write>) -> Result<(), CellularError> {
     info!("start LTE sequence");
 
     lte.power_cycle().await?;

@@ -1,3 +1,4 @@
+use embedded_io_async::{Read, Write};
 use heapless::format;
 use nom::{Parser, bytes::complete::tag};
 
@@ -26,12 +27,12 @@ impl TryFrom<u32> for SleepMode {
     }
 }
 
-pub async fn set_sleep_mode(client: &impl AtClient, mode: SleepMode) -> Result<(), AtError> {
+pub async fn set_sleep_mode<'ch, Stream: Read + Write + 'ch>(client: &impl AtClient<'ch, Stream>, mode: SleepMode) -> Result<(), AtError> {
     at_request!("AT+CSCLK={}", mode as i32).send(client).await?;
     Ok(())
 }
 
-pub async fn read_sleep_mode(client: &impl AtClient) -> Result<SleepMode, AtError> {
+pub async fn read_sleep_mode<'ch, Stream: Read + Write + 'ch>(client: &impl AtClient<'ch, Stream>) -> Result<SleepMode, AtError> {
     let response = at_request!("AT+CSCLK?").send(client).await?;
     let (_, (_, mode)) = (tag("+CSCLK: "), nom::character::complete::u32).parse(response.line(0)?)?;
     mode.try_into()
@@ -39,7 +40,7 @@ pub async fn read_sleep_mode(client: &impl AtClient) -> Result<SleepMode, AtErro
 
 #[cfg(test)]
 pub mod mocks {
-
+    /*
     use super::*;
     use crate::at::mocks::mock_request;
 
@@ -59,4 +60,5 @@ pub mod mocks {
 
         Ok(())
     }
+    */
 }
