@@ -1,5 +1,3 @@
-use embedded_io_async::{Read, Write};
-
 use crate::{
     at::{AtClient, AtController, AtError},
     at_request,

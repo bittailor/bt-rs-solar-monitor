@@ -1,4 +1,3 @@
-use embedded_io_async::{Read, Write};
 use heapless::format;
 
 use crate::{

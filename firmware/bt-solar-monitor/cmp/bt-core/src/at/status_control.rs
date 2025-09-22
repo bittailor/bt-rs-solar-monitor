@@ -2,7 +2,6 @@ use crate::{
     at::{AtClient, AtController, AtError},
     at_request,
 };
-use embedded_io_async::{Read, Write};
 use heapless::format;
 use nom::{Parser, bytes::complete::tag};
 

@@ -4,7 +4,6 @@ use crate::{
     at::{AtClient, AtController, AtError},
     at_request,
 };
-use embedded_io_async::{Read, Write};
 use nom::{Parser, bytes::complete::tag};
 
 pub enum HttpAction {
