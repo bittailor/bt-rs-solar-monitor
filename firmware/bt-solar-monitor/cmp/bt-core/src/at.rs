@@ -81,60 +81,11 @@ impl AtCommandRequest {
     }
 
     async fn send<'ch, Ctr: AtController>(self, client: &impl AtClient<'ch, Ctr>) -> Result<AtCommandResponse, AtError> {
-        debug!("AtCommandRequest::send {:?}", self);
-        let response = client
-            .use_controller(async |ctr| {
-                debug!("AtCommandRequest::send handle_command {:?}", self);
-                ctr.handle_command(&self).await
-            })
-            .await;
-        debug!("AtCommandRequest::send done {:?}", response);
+        debug!("AT.Req> {:?}", self);
+        let response = client.use_controller(async |ctr| ctr.handle_command(&self).await).await;
+        debug!("AT.Rsp> {:?}", response);
         response
     }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AtHttpReadRequest {
-    offset: usize,
-    len: usize,
-}
-
-impl AtHttpReadRequest {
-    pub fn new(offset: usize, len: usize) -> Self {
-        Self { offset, len }
-    }
-
-    pub async fn send<'ch, Ctr: AtController>(self, client: &impl AtClient<'ch, Ctr>) -> Result<AtHttpReadResponse, AtError> {
-        client.use_controller(async |ctr| ctr.handle_http_read(&self).await).await
-    }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AtHttpWriteRequest {
-    data: Vec<u8, MAX_READ_BUFFER_SIZE>,
-}
-
-impl AtHttpWriteRequest {
-    pub fn new(data: &[u8]) -> Result<Self, AtError> {
-        let mut vec = Vec::<u8, MAX_READ_BUFFER_SIZE>::new();
-        vec.extend_from_slice(data)?;
-        Ok(Self { data: vec })
-    }
-
-    pub async fn send<'ch, Ctr: AtController>(self, client: &impl AtClient<'ch, Ctr>) -> Result<(), AtError> {
-        client.use_controller(async |ctr| ctr.handle_http_write(&self).await).await?;
-        Ok(())
-    }
-}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum AtRequestMessage {
-    AquireAtController,
-    ReleaseAtController,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -175,36 +126,14 @@ impl Default for AtCommandResponse {
 
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AtHttpReadResponse {
-    data: Vec<u8, MAX_READ_BUFFER_SIZE>,
-}
-
-impl AtHttpReadResponse {
-    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize, AtError> {
-        if buf.len() < self.data.len() {
-            return Err(AtError::CapacityError);
-        }
-        let len = core::cmp::min(buf.len(), self.data.len());
-        buf[..len].copy_from_slice(&self.data[..len]);
-        self.data.clear();
-        Ok(len)
-    }
-}
-
-impl Default for AtHttpReadResponse {
-    fn default() -> Self {
-        Self { data: Vec::new() }
-    }
+enum AtRequestMessage {
+    AquireAtController,
+    ReleaseAtController,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct AtHttpWriteResponse {}
-
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum AtResponseMessage {
+enum AtResponseMessage {
     Ok,
 }
 
@@ -224,7 +153,7 @@ impl<Stream: Read + Write> State<Stream> {
     }
 }
 
-pub async fn new<'a, Stream: Read + Write>(
+pub(crate) async fn new<'a, Stream: Read + Write>(
     state: &'a mut State<Stream>,
     stream: Stream,
 ) -> (crate::at::Runner<'a, AtControllerImpl<Stream>>, AtClientImpl<'a, AtControllerImpl<Stream>>) {
@@ -263,7 +192,7 @@ pub struct Runner<'ch, Ctr: AtController> {
 }
 
 impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
-    pub fn new(
+    fn new(
         at_controller: AtControllerHandle<'ch, Ctr>,
         receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
         sender: Sender<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
@@ -276,7 +205,6 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
     }
 
     pub async fn run(mut self) {
-        #[allow(clippy::large_enum_variant)]
         #[derive(Debug, Eq, PartialEq)]
         #[cfg_attr(feature = "defmt", derive(defmt::Format))]
         enum State {
@@ -286,14 +214,14 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
 
         let mut state = State::UrcPoll;
         loop {
-            debug!("AT runner loop: enter {:?}", state);
+            trace!("AT runner loop: enter {:?}", state);
             match state {
                 State::UrcPoll => {
                     let next = {
                         let mut ctr = self.at_controller.inner().await;
                         select(self.receiver.receive(), ctr.poll_urc()).await
                     };
-                    debug!("AT runner loop: handle {:?}", next);
+                    trace!("AT runner loop: handle {:?}", next);
                     match next {
                         embassy_futures::select::Either::First(request) => match request {
                             AtRequestMessage::AquireAtController => {
@@ -310,7 +238,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
                 }
                 State::AtControllerAquired => {
                     let next = self.receiver.receive().await;
-                    debug!("AT runner loop: handle {:?}", next);
+                    trace!("AT runner loop: handle {:?}", next);
                     match next {
                         AtRequestMessage::AquireAtController => {
                             warn!("AquireAtController while already aquired");
@@ -323,7 +251,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
                     };
                 }
             }
-            debug!("AT runner loop: exit");
+            trace!("AT runner loop: exit");
         }
     }
 
@@ -335,7 +263,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
 pub trait AtClient<'ch, Ctr: AtController> {
     async fn use_controller<'a, F, R>(&'a self, f: F) -> R
     where
-        F: AsyncFn(&mut Ctr) -> R + 'a,
+        F: AsyncFnMut(&mut Ctr) -> R + 'a,
         Ctr: 'a;
 }
 
@@ -346,7 +274,7 @@ pub struct AtClientImpl<'ch, Ctr: AtController> {
 }
 
 impl<'ch, Ctr: AtController> AtClientImpl<'ch, Ctr> {
-    pub fn new(
+    fn new(
         tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
         rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
         at_controller: AtControllerHandle<'ch, Ctr>,
@@ -356,9 +284,9 @@ impl<'ch, Ctr: AtController> AtClientImpl<'ch, Ctr> {
 }
 
 impl<'ch, Ctr: AtController> AtClient<'ch, Ctr> for AtClientImpl<'ch, Ctr> {
-    async fn use_controller<'a, F, R>(&'a self, f: F) -> R
+    async fn use_controller<'a, F, R>(&'a self, mut f: F) -> R
     where
-        F: AsyncFn(&mut Ctr) -> R + 'a,
+        F: AsyncFnMut(&mut Ctr) -> R + 'a,
         Ctr: 'a,
     {
         self.tx.send(AtRequestMessage::AquireAtController).await;
@@ -390,8 +318,8 @@ impl<'ch, Ctr: AtController> AtControllerHandle<'ch, Ctr> {
 
 pub trait AtController {
     async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError>;
-    async fn handle_http_read(&mut self, read: &AtHttpReadRequest) -> Result<AtHttpReadResponse, AtError>;
-    async fn handle_http_write(&mut self, write: &AtHttpWriteRequest) -> Result<AtHttpWriteResponse, AtError>;
+    async fn handle_http_read(&mut self, buf: &mut [u8], offset: usize) -> Result<(), AtError>;
+    async fn handle_http_write(&mut self, buf: &[u8]) -> Result<(), AtError>;
 
     async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE>;
 }
@@ -422,16 +350,14 @@ impl<S: Read + Write> AtController for AtControllerImpl<S> {
         Ok(response)
     }
 
-    async fn handle_http_read(&mut self, read: &AtHttpReadRequest) -> Result<AtHttpReadResponse, AtError> {
-        let mut response = AtHttpReadResponse::default();
-        response.data.resize(read.len, 0)?;
-        self.http_read(read, &mut response.data).await?;
-        Ok(response)
+    async fn handle_http_read(&mut self, buf: &mut [u8], offset: usize) -> Result<(), AtError> {
+        self.http_read(buf, offset).await?;
+        Ok(())
     }
 
-    async fn handle_http_write(&mut self, write: &AtHttpWriteRequest) -> Result<AtHttpWriteResponse, AtError> {
-        self.http_write(&write.data).await?;
-        Ok(AtHttpWriteResponse {})
+    async fn handle_http_write(&mut self, buf: &[u8]) -> Result<(), AtError> {
+        self.http_write(buf).await?;
+        Ok(())
     }
 
     async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE> {
@@ -457,19 +383,19 @@ impl<S: Read + Write> AtControllerImpl<S> {
         }
     }
 
-    async fn http_read(&mut self, read: &AtHttpReadRequest, buf: &mut [u8]) -> Result<usize, AtError> {
-        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPREAD={},{}", &read.offset, &read.len)?;
+    async fn http_read(&mut self, buf: &mut [u8], offset: usize) -> Result<usize, AtError> {
+        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPREAD={},{}", offset, buf.len())?;
         self.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
         self.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
 
         let mut lines = heapless::Vec::new();
         self.read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
         lines.clear();
-        let start_tag = heapless::format!(AT_BUFFER_SIZE; "+HTTPREAD: {}", &read.len)?;
+        let start_tag = heapless::format!(AT_BUFFER_SIZE; "+HTTPREAD: {}", buf.len())?;
         self.read_line_until_urc(start_tag.as_str(), Duration::from_secs(120), &mut lines).await?;
-        self.stream.read_exact(&mut buf[0..read.len]).await.map_err(|_| AtError::Error)?;
+        self.stream.read_exact(buf).await.map_err(|_| AtError::Error)?;
         self.read_line_until_urc("+HTTPREAD: 0", Duration::from_secs(120), &mut lines).await?;
-        Ok(read.len)
+        Ok(buf.len())
     }
 
     async fn http_write(&mut self, buf: &[u8]) -> Result<usize, AtError> {
@@ -621,10 +547,10 @@ pub mod mocks {
             let response = self.response.take().unwrap().downcast::<AtCommandResponse>().map(|r| *r).unwrap();
             Ok(response)
         }
-        async fn handle_http_read(&mut self, _read: &AtHttpReadRequest) -> Result<AtHttpReadResponse, AtError> {
+        async fn handle_http_read(&mut self, _buf: &mut [u8], _offset: usize) -> Result<(), AtError> {
             Err(AtError::Error)
         }
-        async fn handle_http_write(&mut self, _write: &AtHttpWriteRequest) -> Result<AtHttpWriteResponse, AtError> {
+        async fn handle_http_write(&mut self, _buf: &[u8]) -> Result<(), AtError> {
             Err(AtError::Error)
         }
         async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE> {
@@ -648,9 +574,9 @@ pub mod mocks {
     }
 
     impl<'ch> AtClient<'ch, AtControllerMock> for AtClientMock {
-        async fn use_controller<'a, F, R>(&'a self, f: F) -> R
+        async fn use_controller<'a, F, R>(&'a self, mut f: F) -> R
         where
-            F: AsyncFn(&mut AtControllerMock) -> R + 'a,
+            F: AsyncFnMut(&mut AtControllerMock) -> R + 'a,
             AtControllerMock: 'a,
         {
             let mut ctr = self.controller.borrow_mut();

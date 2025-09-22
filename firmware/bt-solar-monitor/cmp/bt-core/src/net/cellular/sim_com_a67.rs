@@ -5,14 +5,13 @@ use embedded_hal::digital::OutputPin;
 use embedded_io_async::{Read, Write};
 
 use crate::{
-    at::{AtController, AtHttpReadRequest, AtHttpWriteRequest, http::HttpStatusCode, serial_interface::SleepMode, status_control::Rssi},
+    at::{AtClient, AtController, http::HttpStatusCode, serial_interface::SleepMode, status_control::Rssi},
     net::cellular::CellularError,
 };
 
 pub struct State<Stream: Read + Write> {
     at_state: crate::at::State<Stream>,
 }
-
 impl<Stream: Read + Write> State<Stream> {
     pub fn new() -> Self {
         Self {
@@ -20,7 +19,6 @@ impl<Stream: Read + Write> State<Stream> {
         }
     }
 }
-
 impl<Stream: Read + Write> Default for State<Stream> {
     fn default() -> Self {
         Self::new()
@@ -189,7 +187,7 @@ impl<'m, 'ch, Ctr: AtController> HttpRequestBody<'m, 'ch, Ctr> {
 
 impl<'m, 'ch, Ctr: AtController> Write for HttpRequestBody<'m, 'ch, Ctr> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        AtHttpWriteRequest::new(buf)?.send(self.at_client).await?;
+        self.at_client.use_controller(async |ctr| ctr.handle_http_write(buf).await).await?;
         Ok(buf.len())
     }
 }
@@ -240,11 +238,11 @@ impl<'m, 'ch, Ctr: AtController> Read for HttpResponseBody<'m, 'ch, Ctr> {
             return Ok(0);
         }
 
-        let requested = core::cmp::min(remaining, buf.len());
-        let read = core::cmp::min(requested, crate::at::MAX_READ_BUFFER_SIZE);
-        let request = AtHttpReadRequest::new(self.pos, read);
-        let mut response = request.send(self.at_client).await?;
-        let len = response.read(buf)?;
+        let len = core::cmp::min(remaining, buf.len());
+
+        self.at_client
+            .use_controller(async |ctr| ctr.handle_http_read(&mut buf[0..len], self.pos).await)
+            .await?;
         self.pos += len;
         Ok(len)
     }
