@@ -343,12 +343,12 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
 
     pub async fn run(mut self) {
         loop {
-            info!("Runner loop enter");
-            let mut ctr = self.at_controller.inner().await;
-            info!("Runner loop select");
-            let next = select(self.receiver.receive(), ctr.poll_urc()).await;
-            info!("Runner loop got something {:?}", next);
-            drop(ctr);
+            debug!("AT runner loop: enter");
+            let next = {
+                let mut ctr = self.at_controller.inner().await;
+                select(self.receiver.receive(), ctr.poll_urc()).await
+            };
+            debug!("AT runner loop: handle {:?}", next);
             match next {
                 embassy_futures::select::Either::First(request) => match request {
                     AtRequestMessage::Command(cmd) => {
@@ -366,6 +366,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
                 },
                 embassy_futures::select::Either::Second(urc) => self.handle_urc(urc).await,
             };
+            debug!("AT runner loop: exit");
         }
     }
 
