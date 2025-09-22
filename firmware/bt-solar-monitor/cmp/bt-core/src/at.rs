@@ -339,23 +339,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
     }
 
     async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError> {
-        if let Err(_e) = self.at_controller.stream.write_all(cmd.command.as_bytes()).await {
-            error!("Failed to send command: {}", cmd.command);
-            return Err(AtError::Error);
-        }
-        if let Err(_e) = self.at_controller.stream.write_all(b"\r\n").await {
-            error!("Failed to send command: {}", cmd.command);
-            return Err(AtError::Error);
-        }
-        info!("UART.TX> {}", cmd.command);
-        let mut response = AtCommandResponse::default();
-        self.read_response_lines(cmd.command.as_str(), cmd.timeout, &mut response.lines).await?;
-
-        if let Some(prefix) = &cmd.urc_prefix {
-            self.read_line_until_urc(prefix.as_str(), cmd.timeout, &mut response.lines).await?;
-        }
-        debug!("'{}' => completed with {:?}", cmd.command, response);
-        Ok(response)
+        self.at_controller.handle_command(cmd).await
     }
 
     async fn handle_http_read(&mut self, read: &AtHttpReadRequest) -> Result<AtHttpReadResponse, AtError> {
@@ -370,6 +354,80 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
         Ok(AtHttpWriteResponse {})
     }
 
+    async fn http_read(&mut self, read: &AtHttpReadRequest, buf: &mut [u8]) -> Result<usize, AtError> {
+        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPREAD={},{}", &read.offset, &read.len)?;
+        self.at_controller.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
+        self.at_controller.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
+
+        let mut lines = heapless::Vec::new();
+        self.at_controller
+            .read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines)
+            .await?;
+        lines.clear();
+        let start_tag = heapless::format!(AT_BUFFER_SIZE; "+HTTPREAD: {}", &read.len)?;
+        self.at_controller
+            .read_line_until_urc(start_tag.as_str(), Duration::from_secs(120), &mut lines)
+            .await?;
+        self.at_controller.stream.read_exact(&mut buf[0..read.len]).await.map_err(|_| AtError::Error)?;
+        self.at_controller
+            .read_line_until_urc("+HTTPREAD: 0", Duration::from_secs(120), &mut lines)
+            .await?;
+        Ok(read.len)
+    }
+
+    async fn http_write(&mut self, buf: &[u8]) -> Result<usize, AtError> {
+        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPDATA={},{}", &buf.len(), 60)?;
+        self.at_controller.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
+        self.at_controller.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
+
+        let mut lines = heapless::Vec::new();
+        self.at_controller
+            .read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines)
+            .await?;
+        lines.clear();
+        self.at_controller.stream.write_all(buf).await.map_err(|_| AtError::Error)?;
+        self.at_controller.read_response_lines("", Duration::from_secs(10), &mut lines).await?;
+        Ok(buf.len())
+    }
+
+    async fn handle_urc(&mut self, urc: String<AT_BUFFER_SIZE>) {
+        info!("Handling URC: {}", urc.as_str());
+    }
+}
+
+struct AtController<S: Read + Write> {
+    stream: S,
+    line_buffer: heapless::Vec<u8, AT_BUFFER_SIZE>,
+}
+
+impl<S: Read + Write> AtController<S> {
+    pub fn new(stream: S) -> Self {
+        Self {
+            stream,
+            line_buffer: heapless::Vec::new(),
+        }
+    }
+
+    async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError> {
+        if let Err(_e) = self.stream.write_all(cmd.command.as_bytes()).await {
+            error!("Failed to send command: {}", cmd.command);
+            return Err(AtError::Error);
+        }
+        if let Err(_e) = self.stream.write_all(b"\r\n").await {
+            error!("Failed to send command: {}", cmd.command);
+            return Err(AtError::Error);
+        }
+        info!("UART.TX> {}", cmd.command);
+        let mut response = AtCommandResponse::default();
+        self.read_response_lines(cmd.command.as_str(), cmd.timeout, &mut response.lines).await?;
+
+        if let Some(prefix) = &cmd.urc_prefix {
+            self.read_line_until_urc(prefix.as_str(), cmd.timeout, &mut response.lines).await?;
+        }
+        debug!("'{}' => completed with {:?}", cmd.command, response);
+        Ok(response)
+    }
+
     async fn read_response_lines(
         &mut self,
         command: &str,
@@ -378,7 +436,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
     ) -> Result<(), AtError> {
         match with_timeout(timeout, async {
             loop {
-                let line = self.at_controller.read_line().await?;
+                let line = self.read_line().await?;
                 if line == "OK" {
                     debug!("OK => success => {} response lines", lines.len());
                     break Ok(());
@@ -423,7 +481,7 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
     ) -> Result<(), AtError> {
         match with_timeout(timeout, async {
             loop {
-                let line = self.at_controller.read_line().await?;
+                let line = self.read_line().await?;
                 let prefix_match = line.starts_with(prefix);
                 lines.push(line).map_err(|_| AtError::CapacityError)?;
                 if prefix_match {
@@ -446,77 +504,6 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
                 error!("urc '{}' => timeout", prefix);
                 Err(AtError::Timeout)
             }
-        }
-
-        /*
-
-        match response {
-            Ok(mut response_msg) => loop {
-                let line = self.at_controller.read_line().await;
-                if line.is_empty() {
-                    warn!("Empty URC line");
-                    continue;
-                }
-                let found = line.starts_with(prefix.as_str());
-
-                match response_msg.lines.push(line) {
-                    Ok(_) => {}
-                    Err(_) => {
-                        return Err(AtError::Error);
-                    }
-                }
-                if found {
-                    return Ok(response_msg);
-                }
-            },
-            Err(_) => response,
-        }
-        */
-    }
-
-    async fn http_read(&mut self, read: &AtHttpReadRequest, buf: &mut [u8]) -> Result<usize, AtError> {
-        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPREAD={},{}", &read.offset, &read.len)?;
-        self.at_controller.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
-        self.at_controller.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
-
-        let mut lines = heapless::Vec::new();
-        self.read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
-        lines.clear();
-        let start_tag = heapless::format!(AT_BUFFER_SIZE; "+HTTPREAD: {}", &read.len)?;
-        self.read_line_until_urc(start_tag.as_str(), Duration::from_secs(120), &mut lines).await?;
-        self.at_controller.stream.read_exact(&mut buf[0..read.len]).await.map_err(|_| AtError::Error)?;
-        self.read_line_until_urc("+HTTPREAD: 0", Duration::from_secs(120), &mut lines).await?;
-        Ok(read.len)
-    }
-
-    async fn http_write(&mut self, buf: &[u8]) -> Result<usize, AtError> {
-        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPDATA={},{}", &buf.len(), 60)?;
-        self.at_controller.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
-        self.at_controller.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
-
-        let mut lines = heapless::Vec::new();
-        self.read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
-        lines.clear();
-        self.at_controller.stream.write_all(buf).await.map_err(|_| AtError::Error)?;
-        self.read_response_lines("", Duration::from_secs(10), &mut lines).await?;
-        Ok(buf.len())
-    }
-
-    async fn handle_urc(&mut self, urc: String<AT_BUFFER_SIZE>) {
-        info!("Handling URC: {}", urc.as_str());
-    }
-}
-
-struct AtController<S: Read + Write> {
-    stream: S,
-    line_buffer: heapless::Vec<u8, AT_BUFFER_SIZE>,
-}
-
-impl<S: Read + Write> AtController<S> {
-    pub fn new(stream: S) -> Self {
-        Self {
-            stream,
-            line_buffer: heapless::Vec::new(),
         }
     }
 
