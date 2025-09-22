@@ -21,7 +21,7 @@ use heapless::{CapacityError, String, Vec};
 pub const ERROR_STRING_SIZE: usize = 64;
 const CHANNEL_SIZE: usize = 2;
 const AT_BUFFER_SIZE: usize = 256;
-const MAX_RESPONSE_LINES: usize = 8;
+const MAX_RESPONSE_LINES: usize = 4;
 pub const MAX_READ_BUFFER_SIZE: usize = AT_BUFFER_SIZE * MAX_RESPONSE_LINES;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -223,9 +223,9 @@ pub enum AtResponseMessage {
 }
 
 pub struct State<Stream: Read + Write> {
-    pub(super) tx_channel: Channel<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-    pub(super) rx_channel: Channel<NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
-    pub(super) at_controller: MaybeUninit<Mutex<NoopRawMutex, AtController<Stream>>>,
+    tx_channel: Channel<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+    rx_channel: Channel<NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+    at_controller: MaybeUninit<Mutex<NoopRawMutex, AtController<Stream>>>,
 }
 
 impl<Stream: Read + Write> State<Stream> {
@@ -375,48 +375,6 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
             }
             debug!("AT runner loop: exit");
         }
-    }
-
-    async fn handle_http_read(&mut self, read: &AtHttpReadRequest) -> Result<AtHttpReadResponse, AtError> {
-        let mut response = AtHttpReadResponse::default();
-        response.data.resize(read.len, 0)?;
-        self.http_read(read, &mut response.data).await?;
-        Ok(response)
-    }
-
-    async fn handle_http_write(&mut self, write: &AtHttpWriteRequest) -> Result<AtHttpWriteResponse, AtError> {
-        self.http_write(&write.data).await?;
-        Ok(AtHttpWriteResponse {})
-    }
-
-    async fn http_read(&mut self, read: &AtHttpReadRequest, buf: &mut [u8]) -> Result<usize, AtError> {
-        let mut ctr = self.at_controller.inner().await;
-        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPREAD={},{}", &read.offset, &read.len)?;
-        ctr.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
-        ctr.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
-
-        let mut lines = heapless::Vec::new();
-        ctr.read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
-        lines.clear();
-        let start_tag = heapless::format!(AT_BUFFER_SIZE; "+HTTPREAD: {}", &read.len)?;
-        ctr.read_line_until_urc(start_tag.as_str(), Duration::from_secs(120), &mut lines).await?;
-        ctr.stream.read_exact(&mut buf[0..read.len]).await.map_err(|_| AtError::Error)?;
-        ctr.read_line_until_urc("+HTTPREAD: 0", Duration::from_secs(120), &mut lines).await?;
-        Ok(read.len)
-    }
-
-    async fn http_write(&mut self, buf: &[u8]) -> Result<usize, AtError> {
-        let mut ctr = self.at_controller.inner().await;
-        let cmd = heapless::format!(AT_BUFFER_SIZE; "AT+HTTPDATA={},{}", &buf.len(), 60)?;
-        ctr.stream.write_all(cmd.as_bytes()).await.map_err(|_| AtError::Error)?;
-        ctr.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
-
-        let mut lines = heapless::Vec::new();
-        ctr.read_response_lines(cmd.as_str(), Duration::from_secs(10), &mut lines).await?;
-        lines.clear();
-        ctr.stream.write_all(buf).await.map_err(|_| AtError::Error)?;
-        ctr.read_response_lines("", Duration::from_secs(10), &mut lines).await?;
-        Ok(buf.len())
     }
 
     async fn handle_urc(&mut self, urc: String<AT_BUFFER_SIZE>) {
