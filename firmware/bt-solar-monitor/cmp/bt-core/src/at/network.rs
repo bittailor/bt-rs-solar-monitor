@@ -76,29 +76,27 @@ pub async fn get_network_registration<'ch, Ctr: AtController>(
 }
 
 #[cfg(test)]
-pub mod mocks {
-    /*
+pub mod tests {
     use super::*;
     use crate::at::mocks::mock_request;
 
-        #[tokio::test]
-        async fn test_network_registration() -> Result<(), AtError> {
-            let mock = mock_request("AT+CREG?", &["+CREG: 0,0"]);
-            let (n, stat) = get_network_registration(&mock).await?;
-            assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-            assert_eq!(stat, NetworkRegistrationState::NotRegistered);
+    #[tokio::test]
+    async fn test_network_registration() -> Result<(), AtError> {
+        let mock = mock_request("AT+CREG?", &["+CREG: 0,0"]);
+        let (n, stat) = get_network_registration(&mock).await?;
+        assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
+        assert_eq!(stat, NetworkRegistrationState::NotRegistered);
 
-            let mock = mock_request("AT+CREG?", &["+CREG: 0,1"]);
-            let (n, stat) = get_network_registration(&mock).await?;
-            assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-            assert_eq!(stat, NetworkRegistrationState::Registered);
+        let mock = mock_request("AT+CREG?", &["+CREG: 0,1"]);
+        let (n, stat) = get_network_registration(&mock).await?;
+        assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
+        assert_eq!(stat, NetworkRegistrationState::Registered);
 
-            let mock = mock_request("AT+CREG?", &["+CREG: 0,11"]);
-            let (n, stat) = get_network_registration(&mock).await?;
-            assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
-            assert_eq!(stat, NetworkRegistrationState::NotRegisteredSearching);
+        let mock = mock_request("AT+CREG?", &["+CREG: 0,11"]);
+        let (n, stat) = get_network_registration(&mock).await?;
+        assert_eq!(n, NetworkRegistrationUrcConfig::UrcDisabled);
+        assert_eq!(stat, NetworkRegistrationState::NotRegisteredSearching);
 
-            Ok(())
-        }
-    */
+        Ok(())
+    }
 }

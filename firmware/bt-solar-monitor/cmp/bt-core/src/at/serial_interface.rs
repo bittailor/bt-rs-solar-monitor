@@ -38,8 +38,8 @@ pub async fn read_sleep_mode<'ch, Ctr: AtController>(client: &impl AtClient<'ch,
 }
 
 #[cfg(test)]
-pub mod mocks {
-    /*
+pub mod tests {
+
     use super::*;
     use crate::at::mocks::mock_request;
 
@@ -59,5 +59,4 @@ pub mod mocks {
 
         Ok(())
     }
-    */
 }

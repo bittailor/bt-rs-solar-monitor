@@ -12,7 +12,7 @@ use embassy_futures::select::select;
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
     channel::{Channel, Receiver, Sender},
-    mutex::{Mutex, MutexGuard},
+    mutex::Mutex,
 };
 use embassy_time::{Duration, with_timeout};
 use embedded_io_async::{Read, Write};
@@ -353,17 +353,6 @@ impl<'ch, Ctr: AtController> AtClientImpl<'ch, Ctr> {
     ) -> Self {
         Self { tx, rx, at_controller }
     }
-
-    async fn aquire_controller<'a>(&'a self) -> AtControllerGuard<'a, Ctr>
-    where
-        Ctr: 'a,
-    {
-        self.tx.send(AtRequestMessage::AquireAtController).await;
-        let _ = self.rx.receive().await;
-
-        let guard = self.at_controller.inner().await;
-        AtControllerGuard { guard }
-    }
 }
 
 impl<'ch, Ctr: AtController> AtClient<'ch, Ctr> for AtClientImpl<'ch, Ctr> {
@@ -374,7 +363,7 @@ impl<'ch, Ctr: AtController> AtClient<'ch, Ctr> for AtClientImpl<'ch, Ctr> {
     {
         self.tx.send(AtRequestMessage::AquireAtController).await;
         let _ = self.rx.receive().await;
-        let mut ctr = self.aquire_controller().await;
+        let mut ctr = self.at_controller.inner().await;
         let response = f(&mut ctr).await;
         drop(ctr);
         self.tx.send(AtRequestMessage::ReleaseAtController).await;
@@ -396,24 +385,6 @@ impl<'ch, Ctr: AtController> Clone for AtControllerHandle<'ch, Ctr> {
 impl<'ch, Ctr: AtController> AtControllerHandle<'ch, Ctr> {
     async fn inner(&self) -> embassy_sync::mutex::MutexGuard<'_, NoopRawMutex, Ctr> {
         self.inner.lock().await
-    }
-}
-
-struct AtControllerGuard<'ch, Ctr: AtController> {
-    guard: embassy_sync::mutex::MutexGuard<'ch, NoopRawMutex, Ctr>,
-}
-
-impl<'ch, Ctr: AtController> core::ops::Deref for AtControllerGuard<'ch, Ctr> {
-    type Target = Ctr;
-
-    fn deref(&self) -> &Self::Target {
-        &*self.guard
-    }
-}
-
-impl<'ch, Ctr: AtController> core::ops::DerefMut for AtControllerGuard<'ch, Ctr> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.guard
     }
 }
 
@@ -631,36 +602,59 @@ impl<S: Read + Write> AtControllerImpl<S> {
 
 #[cfg(test)]
 pub mod mocks {
-    /*
+
     use super::*;
     use crate::at::{AT_BUFFER_SIZE, AtCommandResponse, AtError, MAX_RESPONSE_LINES};
-    use core::cell::RefCell;
+    use core::{any::Any, cell::RefCell};
+    use std::boxed::Box;
+
+    pub struct AtControllerMock {
+        request: Box<dyn Any>,
+        response: Option<Box<dyn Any>>,
+    }
+
+    impl AtController for AtControllerMock {
+        async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError> {
+            let request = self.request.downcast_ref::<AtCommandRequest>().unwrap();
+            assert_eq!(cmd, request);
+
+            let response = self.response.take().unwrap().downcast::<AtCommandResponse>().map(|r| *r).unwrap();
+            Ok(response)
+        }
+        async fn handle_http_read(&mut self, _read: &AtHttpReadRequest) -> Result<AtHttpReadResponse, AtError> {
+            Err(AtError::Error)
+        }
+        async fn handle_http_write(&mut self, _write: &AtHttpWriteRequest) -> Result<AtHttpWriteResponse, AtError> {
+            Err(AtError::Error)
+        }
+        async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE> {
+            String::new()
+        }
+    }
 
     pub struct AtClientMock {
-        request: AtRequestMessage,
-        response: RefCell<Option<AtResponseMessage>>,
+        controller: RefCell<AtControllerMock>,
     }
 
     impl AtClientMock {
-        pub fn new(request: AtRequestMessage, response: AtResponseMessage) -> Self {
+        pub fn new(request: Box<dyn Any>, response: Box<dyn Any>) -> Self {
             Self {
-                request,
-                response: RefCell::new(Some(response)),
+                controller: RefCell::new(AtControllerMock {
+                    request,
+                    response: Some(response),
+                }),
             }
         }
     }
 
-    impl<'ch, Stream: Read + Write + 'ch> AtClient<'ch, Stream> for AtClientMock {
-        async fn send(&self, request: AtRequestMessage) {
-            assert_eq!(self.request, request);
-        }
-
-        async fn receive(&self) -> Result<AtResponseMessage, AtError> {
-            Ok(self.response.take().unwrap())
-        }
-
-        async fn at_controller(&self) -> AtControllerHandle<'ch, Stream> {
-            todo!()
+    impl<'ch> AtClient<'ch, AtControllerMock> for AtClientMock {
+        async fn use_controller<'a, F, R>(&'a self, f: F) -> R
+        where
+            F: AsyncFn(&mut AtControllerMock) -> R + 'a,
+            AtControllerMock: 'a,
+        {
+            let mut ctr = self.controller.borrow_mut();
+            f(&mut ctr).await
         }
     }
 
@@ -670,10 +664,6 @@ pub mod mocks {
             lines.push(heapless::String::<AT_BUFFER_SIZE>::try_from(*line).unwrap()).unwrap();
         }
 
-        AtClientMock::new(
-            AtRequestMessage::Command(AtCommandRequest::new(heapless::String::<AT_BUFFER_SIZE>::try_from(command).unwrap())),
-            AtResponseMessage::Command(AtCommandResponse::new(lines)),
-        )
+        AtClientMock::new(Box::new(AtCommandRequest::new(command.try_into().unwrap())), Box::new(AtCommandResponse::new(lines)))
     }
-    */
 }
