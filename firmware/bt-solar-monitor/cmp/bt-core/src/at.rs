@@ -153,7 +153,7 @@ impl<Stream: Read + Write> State<Stream> {
     }
 }
 
-pub(crate) async fn new<'a, Stream: Read + Write>(
+pub fn new<'a, Stream: Read + Write>(
     state: &'a mut State<Stream>,
     stream: Stream,
 ) -> (crate::at::Runner<'a, AtControllerImpl<Stream>>, AtClientImpl<'a, AtControllerImpl<Stream>>) {

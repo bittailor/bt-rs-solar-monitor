@@ -3,6 +3,7 @@
 
 use bt_core::at::AtController;
 use bt_core::net::cellular::CellularError;
+use bt_core::net::cellular::sim_com_a67::CellularModule;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
@@ -35,8 +36,16 @@ async fn main(_spawner: Spawner) {
     let rx_buf = &mut RX_BUF.init([0; 1024])[..];
     let uart: BufferedUart = BufferedUart::new(uart, tx_pin, rx_pin, Irqs, tx_buf, rx_buf, uart::Config::default());
 
-    let mut lte_state = bt_core::net::cellular::sim_com_a67::State::new();
-    let (mut lte, lte_runner) = bt_core::net::cellular::sim_com_a67::new(&mut lte_state, uart, pwrkey, reset).await;
+    let mut at_state = bt_core::at::State::new();
+    let (at_runner, at_client) = bt_core::at::new(&mut at_state, uart);
+    let mut lte = CellularModule::new(at_client, pwrkey, reset);
+
+    let sequence = async {
+        match lte_sequence(&mut lte).await {
+            Ok(_) => info!("LTE commands done"),
+            Err(e) => error!("LTE commands error: {:?}", e),
+        }
+    };
 
     let blinky = async {
         loop {
@@ -48,14 +57,7 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    let sequenc = async {
-        match lte_sequence(&mut lte).await {
-            Ok(_) => info!("LTE commands done"),
-            Err(e) => error!("LTE commands error: {:?}", e),
-        }
-    };
-
-    join3(blinky, lte_runner.run(), sequenc).await;
+    join3(blinky, at_runner.run(), sequence).await;
 }
 
 async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin, impl AtController>) -> Result<(), CellularError> {

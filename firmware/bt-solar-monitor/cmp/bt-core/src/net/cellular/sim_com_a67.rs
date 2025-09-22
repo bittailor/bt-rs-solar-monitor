@@ -9,39 +9,6 @@ use crate::{
     net::cellular::CellularError,
 };
 
-pub struct State<Stream: Read + Write> {
-    at_state: crate::at::State<Stream>,
-}
-impl<Stream: Read + Write> State<Stream> {
-    pub fn new() -> Self {
-        Self {
-            at_state: crate::at::State::new(),
-        }
-    }
-}
-impl<Stream: Read + Write> Default for State<Stream> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub async fn new<'a, Stream: Read + Write, Output: OutputPin>(
-    state: &'a mut State<Stream>,
-    stream: Stream,
-    pwrkey: Output,
-    reset: Output,
-) -> (CellularModule<'a, Output, crate::at::AtControllerImpl<Stream>>, crate::at::Runner<'a, crate::at::AtControllerImpl<Stream>>) {
-    let (runner, at_client) = crate::at::new(&mut state.at_state, stream).await;
-
-    let lte = CellularModule {
-        at_client,
-        pwrkey,
-        reset,
-        http_initialized: false,
-    };
-    (lte, runner)
-}
-
 pub struct CellularModule<'ch, Output: OutputPin, Ctr: AtController> {
     at_client: crate::at::AtClientImpl<'ch, Ctr>,
     pwrkey: Output,
@@ -49,7 +16,16 @@ pub struct CellularModule<'ch, Output: OutputPin, Ctr: AtController> {
     http_initialized: bool,
 }
 
-impl<Output: OutputPin, Ctr: AtController> CellularModule<'_, Output, Ctr> {
+impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule<'ch, Output, Ctr> {
+    pub fn new(at_client: crate::at::AtClientImpl<'ch, Ctr>, pwrkey: Output, reset: Output) -> Self {
+        CellularModule {
+            at_client,
+            pwrkey,
+            reset,
+            http_initialized: false,
+        }
+    }
+
     pub async fn is_alive(&self) -> bool {
         crate::at::at(&self.at_client).await.is_ok()
     }
