@@ -2,7 +2,7 @@ use embedded_io_async::{Read, Write};
 use heapless::format;
 
 use crate::{
-    at::{AtClient, AtError},
+    at::{AtClient, AtController, AtError},
     at_request,
 };
 use nom::{Parser, bytes::complete::tag};
@@ -68,8 +68,8 @@ impl TryFrom<u32> for NetworkRegistrationState {
 
 // +CREG: <n>,<stat>[,<lac>,<ci>]
 // +CREG: 0,1
-pub async fn get_network_registration<'ch, Stream: Read + Write + 'ch>(
-    ctr: &impl AtClient<'ch, Stream>,
+pub async fn get_network_registration<'ch, Ctr: AtController>(
+    ctr: &impl AtClient<'ch, Ctr>,
 ) -> Result<(NetworkRegistrationUrcConfig, NetworkRegistrationState), AtError> {
     let response = at_request!("AT+CREG?").send(ctr).await?;
     let (_, (_, n, _, stat)) = (tag("+CREG: "), nom::character::complete::u32, tag(","), nom::character::complete::u32).parse(response.line(0)?)?;

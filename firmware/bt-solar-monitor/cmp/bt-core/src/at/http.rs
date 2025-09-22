@@ -1,7 +1,7 @@
 //use core::fmt::Write;
 
 use crate::{
-    at::{AtClient, AtError},
+    at::{AtClient, AtController, AtError},
     at_request,
 };
 use embedded_io_async::{Read, Write};
@@ -36,22 +36,22 @@ impl defmt::Format for HttpStatusCode {
     }
 }
 
-pub async fn init<'ch, Stream: Read + Write + 'ch>(client: &impl AtClient<'ch, Stream>) -> Result<(), AtError> {
+pub async fn init<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>) -> Result<(), AtError> {
     at_request!("AT+HTTPINIT").send(client).await?;
     Ok(())
 }
 
-pub async fn term<'ch, Stream: Read + Write + 'ch>(client: &impl AtClient<'ch, Stream>) -> Result<(), AtError> {
+pub async fn term<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>) -> Result<(), AtError> {
     at_request!("AT+HTTPTERM").send(client).await?;
     Ok(())
 }
 
-pub async fn set_url<'ch, Stream: Read + Write + 'ch>(client: &impl AtClient<'ch, Stream>, url: &str) -> Result<(), AtError> {
+pub async fn set_url<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>, url: &str) -> Result<(), AtError> {
     at_request!("AT+HTTPPARA=\"URL\",\"{}\"", url).send(client).await?;
     Ok(())
 }
 
-pub async fn action<'ch, Stream: Read + Write + 'ch>(client: &impl AtClient<'ch, Stream>, action: HttpAction) -> Result<(HttpStatusCode, usize), AtError> {
+pub async fn action<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>, action: HttpAction) -> Result<(HttpStatusCode, usize), AtError> {
     let response = at_request!("AT+HTTPACTION={}", action as u32)
         .with_urc_prefix("+HTTPACTION: ".try_into()?)
         .send(client)

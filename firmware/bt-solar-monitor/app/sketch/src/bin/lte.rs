@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+use bt_core::at::AtController;
 use bt_core::net::cellular::CellularError;
 use defmt::*;
 use embassy_executor::Spawner;
@@ -57,7 +58,7 @@ async fn main(_spawner: Spawner) {
     join3(blinky, lte_runner.run(), sequenc).await;
 }
 
-async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin, impl Read + Write>) -> Result<(), CellularError> {
+async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin, impl AtController>) -> Result<(), CellularError> {
     info!("start LTE sequence");
 
     lte.power_cycle().await?;

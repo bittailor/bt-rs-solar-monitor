@@ -12,7 +12,7 @@ use embassy_futures::select::select;
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
     channel::{Channel, Receiver, Sender},
-    mutex::Mutex,
+    mutex::{Mutex, MutexGuard},
 };
 use embassy_time::{Duration, with_timeout};
 use embedded_io_async::{Read, Write};
@@ -80,18 +80,15 @@ impl AtCommandRequest {
         self
     }
 
-    async fn send<'ch, Stream: Read + Write + 'ch>(self, client: &impl AtClient<'ch, Stream>) -> Result<AtCommandResponse, AtError> {
+    async fn send<'ch, Ctr: AtController>(self, client: &impl AtClient<'ch, Ctr>) -> Result<AtCommandResponse, AtError> {
         debug!("AtCommandRequest::send {:?}", self);
-        client.send(AtRequestMessage::AquireAtController).await;
-        client.receive().await?;
-        debug!("AtCommandRequest::send controller msg aquired");
-        let mut ctr = client.at_controller().inner().await;
-        debug!("AtCommandRequest::send controller lock aquired ");
-        let response = ctr.handle_command(&self).await;
-        client.send(AtRequestMessage::ReleaseAtController).await;
-        client.receive().await?;
-        debug!("AtCommandRequest::send done");
-
+        let response = client
+            .use_controller(async |ctr| {
+                debug!("AtCommandRequest::send handle_command {:?}", self);
+                ctr.handle_command(&self).await
+            })
+            .await;
+        debug!("AtCommandRequest::send done {:?}", response);
         response
     }
 }
@@ -108,14 +105,8 @@ impl AtHttpReadRequest {
         Self { offset, len }
     }
 
-    pub async fn send<'ch, Stream: Read + Write + 'ch>(self, client: &impl AtClient<'ch, Stream>) -> Result<AtHttpReadResponse, AtError> {
-        client.send(AtRequestMessage::AquireAtController).await;
-        client.receive().await?;
-        let mut ctr = client.at_controller().inner().await;
-        let response = ctr.handle_http_read(&self).await;
-        client.send(AtRequestMessage::ReleaseAtController).await;
-        client.receive().await?;
-        response
+    pub async fn send<'ch, Ctr: AtController>(self, client: &impl AtClient<'ch, Ctr>) -> Result<AtHttpReadResponse, AtError> {
+        client.use_controller(async |ctr| ctr.handle_http_read(&self).await).await
     }
 }
 
@@ -132,13 +123,8 @@ impl AtHttpWriteRequest {
         Ok(Self { data: vec })
     }
 
-    pub async fn send<'ch, Stream: Read + Write + 'ch>(self, client: &impl AtClient<'ch, Stream>) -> Result<(), AtError> {
-        client.send(AtRequestMessage::AquireAtController).await;
-        client.receive().await?;
-        let mut ctr = client.at_controller().inner().await;
-        let _response = ctr.handle_http_write(&self).await?;
-        client.send(AtRequestMessage::ReleaseAtController).await;
-        client.receive().await?;
+    pub async fn send<'ch, Ctr: AtController>(self, client: &impl AtClient<'ch, Ctr>) -> Result<(), AtError> {
+        client.use_controller(async |ctr| ctr.handle_http_write(&self).await).await?;
         Ok(())
     }
 }
@@ -225,7 +211,7 @@ pub enum AtResponseMessage {
 pub struct State<Stream: Read + Write> {
     tx_channel: Channel<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
     rx_channel: Channel<NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
-    at_controller: MaybeUninit<Mutex<NoopRawMutex, AtController<Stream>>>,
+    at_controller: MaybeUninit<Mutex<NoopRawMutex, AtControllerImpl<Stream>>>,
 }
 
 impl<Stream: Read + Write> State<Stream> {
@@ -238,10 +224,13 @@ impl<Stream: Read + Write> State<Stream> {
     }
 }
 
-pub async fn new<'a, Stream: Read + Write>(state: &'a mut State<Stream>, stream: Stream) -> (crate::at::Runner<'a, Stream>, AtClientImpl<'a, Stream>) {
-    let at_client = Mutex::new(crate::at::AtController::new(stream));
+pub async fn new<'a, Stream: Read + Write>(
+    state: &'a mut State<Stream>,
+    stream: Stream,
+) -> (crate::at::Runner<'a, AtControllerImpl<Stream>>, AtClientImpl<'a, AtControllerImpl<Stream>>) {
+    let at_client = Mutex::new(crate::at::AtControllerImpl::new(stream));
     state.at_controller.write(at_client);
-    let ctr: &Mutex<NoopRawMutex, AtController<Stream>> = unsafe { &*state.at_controller.as_ptr() };
+    let ctr: &Mutex<NoopRawMutex, AtControllerImpl<Stream>> = unsafe { &*state.at_controller.as_ptr() };
     let handle = AtControllerHandle { inner: ctr };
     let runner = crate::at::Runner::new(handle, state.tx_channel.receiver(), state.rx_channel.sender());
     let client = AtClientImpl::new(state.tx_channel.sender(), state.rx_channel.receiver(), handle);
@@ -254,45 +243,6 @@ impl<Stream: Read + Write> Default for State<Stream> {
     }
 }
 
-pub trait AtClient<'ch, Stream: Read + Write + 'ch> {
-    async fn send(&self, request: AtRequestMessage);
-    async fn receive(&self) -> Result<AtResponseMessage, AtError>;
-    fn at_controller(&self) -> &AtControllerHandle<'ch, Stream>;
-}
-
-pub struct AtClientImpl<'ch, Stream: Read + Write> {
-    tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-    rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
-    at_controller: AtControllerHandle<'ch, Stream>,
-}
-
-impl<'ch, Stream: Read + Write> AtClientImpl<'ch, Stream> {
-    pub fn new(
-        tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-        rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
-        at_controller: AtControllerHandle<'ch, Stream>,
-    ) -> Self {
-        Self { tx, rx, at_controller }
-    }
-}
-
-impl<'ch, Stream: Read + Write> AtClient<'ch, Stream> for AtClientImpl<'ch, Stream> {
-    async fn send(&self, request: AtRequestMessage) {
-        debug!("AtClientImpl::send {:?}", request);
-        self.tx.send(request).await;
-    }
-
-    async fn receive(&self) -> Result<AtResponseMessage, AtError> {
-        let response = self.rx.receive().await;
-        debug!("AtClientImpl::receive {:?}", response);
-        response
-    }
-
-    fn at_controller(&self) -> &AtControllerHandle<'ch, Stream> {
-        &self.at_controller
-    }
-}
-
 #[macro_export]
 macro_rules! at_request {
     ($s:literal $(, $x:expr)* $(,)?) => {{
@@ -301,20 +251,20 @@ macro_rules! at_request {
     }};
 }
 
-pub async fn at<'ch, Stream: Read + Write + 'ch>(client: &impl AtClient<'ch, Stream>) -> Result<(), AtError> {
+pub async fn at<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>) -> Result<(), AtError> {
     at_request!("AT").with_timeout(Duration::from_millis(200)).send(client).await?;
     Ok(())
 }
 
-pub struct Runner<'ch, S: Read + Write> {
+pub struct Runner<'ch, Ctr: AtController> {
     receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
     sender: Sender<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
-    at_controller: AtControllerHandle<'ch, S>,
+    at_controller: AtControllerHandle<'ch, Ctr>,
 }
 
-impl<'ch, S: Read + Write> Runner<'ch, S> {
+impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
     pub fn new(
-        at_controller: AtControllerHandle<'ch, S>,
+        at_controller: AtControllerHandle<'ch, Ctr>,
         receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
         sender: Sender<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
     ) -> Self {
@@ -382,35 +332,105 @@ impl<'ch, S: Read + Write> Runner<'ch, S> {
     }
 }
 
-pub struct AtControllerHandle<'ch, Stream: Read + Write> {
-    inner: &'ch Mutex<NoopRawMutex, AtController<Stream>>,
+pub trait AtClient<'ch, Ctr: AtController> {
+    async fn use_controller<'a, F, R>(&'a self, f: F) -> R
+    where
+        F: AsyncFn(&mut Ctr) -> R + 'a,
+        Ctr: 'a;
 }
-impl<'ch, Stream: Read + Write> Copy for AtControllerHandle<'ch, Stream> {}
-impl<'ch, Stream: Read + Write> Clone for AtControllerHandle<'ch, Stream> {
+
+pub struct AtClientImpl<'ch, Ctr: AtController> {
+    tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+    rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+    at_controller: AtControllerHandle<'ch, Ctr>,
+}
+
+impl<'ch, Ctr: AtController> AtClientImpl<'ch, Ctr> {
+    pub fn new(
+        tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+        rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+        at_controller: AtControllerHandle<'ch, Ctr>,
+    ) -> Self {
+        Self { tx, rx, at_controller }
+    }
+
+    async fn aquire_controller<'a>(&'a self) -> AtControllerGuard<'a, Ctr>
+    where
+        Ctr: 'a,
+    {
+        self.tx.send(AtRequestMessage::AquireAtController).await;
+        let _ = self.rx.receive().await;
+
+        let guard = self.at_controller.inner().await;
+        AtControllerGuard { guard }
+    }
+}
+
+impl<'ch, Ctr: AtController> AtClient<'ch, Ctr> for AtClientImpl<'ch, Ctr> {
+    async fn use_controller<'a, F, R>(&'a self, f: F) -> R
+    where
+        F: AsyncFn(&mut Ctr) -> R + 'a,
+        Ctr: 'a,
+    {
+        self.tx.send(AtRequestMessage::AquireAtController).await;
+        let _ = self.rx.receive().await;
+        let mut ctr = self.aquire_controller().await;
+        let response = f(&mut ctr).await;
+        drop(ctr);
+        self.tx.send(AtRequestMessage::ReleaseAtController).await;
+        let _ = self.rx.receive().await;
+        response
+    }
+}
+
+pub struct AtControllerHandle<'ch, Ctr: AtController> {
+    inner: &'ch Mutex<NoopRawMutex, Ctr>,
+}
+impl<'ch, Ctr: AtController> Copy for AtControllerHandle<'ch, Ctr> {}
+impl<'ch, Ctr: AtController> Clone for AtControllerHandle<'ch, Ctr> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'ch, Stream: Read + Write> AtControllerHandle<'ch, Stream> {
-    async fn inner(&self) -> embassy_sync::mutex::MutexGuard<'_, NoopRawMutex, AtController<Stream>> {
+impl<'ch, Ctr: AtController> AtControllerHandle<'ch, Ctr> {
+    async fn inner(&self) -> embassy_sync::mutex::MutexGuard<'_, NoopRawMutex, Ctr> {
         self.inner.lock().await
     }
 }
 
-struct AtController<S: Read + Write> {
+struct AtControllerGuard<'ch, Ctr: AtController> {
+    guard: embassy_sync::mutex::MutexGuard<'ch, NoopRawMutex, Ctr>,
+}
+
+impl<'ch, Ctr: AtController> core::ops::Deref for AtControllerGuard<'ch, Ctr> {
+    type Target = Ctr;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.guard
+    }
+}
+
+impl<'ch, Ctr: AtController> core::ops::DerefMut for AtControllerGuard<'ch, Ctr> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.guard
+    }
+}
+
+pub trait AtController {
+    async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError>;
+    async fn handle_http_read(&mut self, read: &AtHttpReadRequest) -> Result<AtHttpReadResponse, AtError>;
+    async fn handle_http_write(&mut self, write: &AtHttpWriteRequest) -> Result<AtHttpWriteResponse, AtError>;
+
+    async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE>;
+}
+
+pub struct AtControllerImpl<S: Read + Write> {
     stream: S,
     line_buffer: heapless::Vec<u8, AT_BUFFER_SIZE>,
 }
 
-impl<S: Read + Write> AtController<S> {
-    pub fn new(stream: S) -> Self {
-        Self {
-            stream,
-            line_buffer: heapless::Vec::new(),
-        }
-    }
-
+impl<S: Read + Write> AtController for AtControllerImpl<S> {
     async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError> {
         if let Err(_e) = self.stream.write_all(cmd.command.as_bytes()).await {
             error!("Failed to send command: {}", cmd.command);
@@ -441,6 +461,29 @@ impl<S: Read + Write> AtController<S> {
     async fn handle_http_write(&mut self, write: &AtHttpWriteRequest) -> Result<AtHttpWriteResponse, AtError> {
         self.http_write(&write.data).await?;
         Ok(AtHttpWriteResponse {})
+    }
+
+    async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE> {
+        loop {
+            match self.read_line().await {
+                Ok(urc_line) => {
+                    debug!("URC.RX> {}", urc_line.as_str());
+                    return urc_line;
+                }
+                Err(_) => {
+                    warn!("read error while urc polling => ignore");
+                }
+            }
+        }
+    }
+}
+
+impl<S: Read + Write> AtControllerImpl<S> {
+    pub fn new(stream: S) -> Self {
+        Self {
+            stream,
+            line_buffer: heapless::Vec::new(),
+        }
     }
 
     async fn http_read(&mut self, read: &AtHttpReadRequest, buf: &mut [u8]) -> Result<usize, AtError> {
@@ -546,20 +589,6 @@ impl<S: Read + Write> AtController<S> {
             Err(_e) => {
                 error!("urc '{}' => timeout", prefix);
                 Err(AtError::Timeout)
-            }
-        }
-    }
-
-    async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE> {
-        loop {
-            match self.read_line().await {
-                Ok(urc_line) => {
-                    debug!("URC.RX> {}", urc_line.as_str());
-                    return urc_line;
-                }
-                Err(_) => {
-                    warn!("read error while urc polling => ignore");
-                }
             }
         }
     }
