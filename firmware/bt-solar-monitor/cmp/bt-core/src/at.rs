@@ -209,7 +209,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
         #[cfg_attr(feature = "defmt", derive(defmt::Format))]
         enum State {
             UrcPoll,
-            AtControllerAquired,
+            AtControllerAcquired,
         }
 
         let mut state = State::UrcPoll;
@@ -225,7 +225,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
                     match next {
                         embassy_futures::select::Either::First(request) => match request {
                             AtRequestMessage::AcquireAtController => {
-                                state = State::AtControllerAquired;
+                                state = State::AtControllerAcquired;
                                 self.sender.send(Ok(AtResponseMessage::Ok)).await;
                             }
                             AtRequestMessage::ReleaseAtController => {
@@ -236,7 +236,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
                         embassy_futures::select::Either::Second(urc) => self.handle_urc(urc).await,
                     };
                 }
-                State::AtControllerAquired => {
+                State::AtControllerAcquired => {
                     let next = self.receiver.receive().await;
                     trace!("AT runner loop: handle {:?}", next);
                     match next {
