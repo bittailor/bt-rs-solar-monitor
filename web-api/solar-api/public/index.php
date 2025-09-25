@@ -29,6 +29,14 @@ Flight::group('/api/v1', function () {
         Flight::response()->setHeader('Content-Type', 'x');
         Flight::response()->write("solar data <- $msg [$hex]");
     });
+    Flight::route('/solar/headers', function () {
+        $msg = Flight::request()->headers();
+        Flight::response()->setHeader('Content-Type', 'text/plain');
+        Flight::response()->write("Headers:\n");
+        foreach ($msg as $k => $v) {
+            Flight::response()->write(" - $k: $v\n");
+        }
+    });
     Flight::route('POST /lte', function () {
         $msg = Flight::request()->getBody();
         $hex = bin2hex($msg);

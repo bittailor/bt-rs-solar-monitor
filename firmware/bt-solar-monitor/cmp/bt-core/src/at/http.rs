@@ -50,6 +50,11 @@ pub async fn set_url<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>, u
     Ok(())
 }
 
+pub async fn set_header<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>, header: &str, value: &str) -> Result<(), AtError> {
+    at_request!("AT+HTTPPARA=\"USERDATA\",\"{}: {}\"", header, value).send(client).await?;
+    Ok(())
+}
+
 pub async fn action<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>, action: HttpAction) -> Result<(HttpStatusCode, usize), AtError> {
     let response = at_request!("AT+HTTPACTION={}", action as u32)
         .with_urc_prefix("+HTTPACTION: ".try_into()?)

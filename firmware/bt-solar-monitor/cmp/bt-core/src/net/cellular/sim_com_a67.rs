@@ -2,7 +2,7 @@ use core::str::{self};
 
 use embassy_time::{Duration, Timer, WithTimeout};
 use embedded_hal::digital::OutputPin;
-use embedded_io_async::{Read, Write};
+use embedded_io_async::Read;
 
 use crate::{
     at::{AtClient, AtController, http::HttpStatusCode, serial_interface::SleepMode, status_control::Rssi},
@@ -122,15 +122,13 @@ impl<'m, 'ch, Ctr: AtController> HttpRequest<'m, 'ch, Ctr> {
         Ok(Self { at_client })
     }
 
-    pub async fn set_url(&self, url: &str) -> Result<(), CellularError> {
-        crate::at::http::set_url(self.at_client, url).await.map_err(Into::into)
+    pub async fn set_header(&self, header: &str, value: &str) -> Result<&HttpRequest<'m, 'ch, Ctr>, CellularError> {
+        crate::at::http::set_header(self.at_client, header, value).await?;
+        Ok(self)
     }
 
-    pub fn body(&self) -> HttpRequestBody<'_, '_, Ctr> {
-        HttpRequestBody::new(self.at_client)
-    }
-
-    pub async fn get(&self) -> Result<HttpResponse<'_, '_, Ctr>, CellularError> {
+    pub async fn get(&self, url: &str) -> Result<HttpResponse<'_, '_, Ctr>, CellularError> {
+        crate::at::http::set_url(self.at_client, url).await?;
         crate::at::http::action(self.at_client, crate::at::http::HttpAction::Get)
             .await
             .map_err(Into::into)
@@ -140,7 +138,9 @@ impl<'m, 'ch, Ctr: AtController> HttpRequest<'m, 'ch, Ctr> {
             })
     }
 
-    pub async fn post(&self) -> Result<HttpResponse<'_, '_, Ctr>, CellularError> {
+    pub async fn post(&self, url: &str, body: &[u8]) -> Result<HttpResponse<'_, '_, Ctr>, CellularError> {
+        crate::at::http::set_url(self.at_client, url).await?;
+        self.at_client.use_controller(async |ctr| ctr.handle_http_write(body).await).await?;
         crate::at::http::action(self.at_client, crate::at::http::HttpAction::Post)
             .await
             .map_err(Into::into)
@@ -149,27 +149,6 @@ impl<'m, 'ch, Ctr: AtController> HttpRequest<'m, 'ch, Ctr> {
                 body: HttpResponseBody::new(self.at_client, len),
             })
     }
-}
-
-pub struct HttpRequestBody<'m, 'ch, Ctr: AtController> {
-    at_client: &'m crate::at::AtClientImpl<'ch, Ctr>,
-}
-
-impl<'m, 'ch, Ctr: AtController> HttpRequestBody<'m, 'ch, Ctr> {
-    fn new(at_client: &'m crate::at::AtClientImpl<'ch, Ctr>) -> Self {
-        Self { at_client }
-    }
-}
-
-impl<'m, 'ch, Ctr: AtController> Write for HttpRequestBody<'m, 'ch, Ctr> {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        self.at_client.use_controller(async |ctr| ctr.handle_http_write(buf).await).await?;
-        Ok(buf.len())
-    }
-}
-
-impl<'m, 'ch, Ctr: AtController> embedded_io_async::ErrorType for HttpRequestBody<'m, 'ch, Ctr> {
-    type Error = CellularError;
 }
 
 pub struct HttpResponse<'m, 'ch, Ctr: AtController> {
@@ -205,6 +184,29 @@ impl<'m, 'ch, Ctr: AtController> HttpResponseBody<'m, 'ch, Ctr> {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
+
+    pub async fn read_to_end(&mut self, mut buf: &mut [u8]) -> Result<usize, CellularError> {
+        let mut total_read = 0;
+        while !buf.is_empty() {
+            match self.read(buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    buf = &mut buf[n..];
+                    total_read += n;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(total_read)
+    }
+
+    pub async fn read_as_str<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a str, CellularError> {
+        let n = self.read_to_end(buf).await?;
+        str::from_utf8(&buf[..n]).map_err(|_| {
+            error!("http body not utf8");
+            CellularError::AtError(crate::at::AtError::Error)
+        })
+    }
 }
 
 impl<'m, 'ch, Ctr: AtController> Read for HttpResponseBody<'m, 'ch, Ctr> {
@@ -213,9 +215,7 @@ impl<'m, 'ch, Ctr: AtController> Read for HttpResponseBody<'m, 'ch, Ctr> {
         if remaining == 0 {
             return Ok(0);
         }
-
         let len = core::cmp::min(remaining, buf.len());
-
         self.at_client
             .use_controller(async |ctr| ctr.handle_http_read(&mut buf[0..len], self.pos).await)
             .await?;
