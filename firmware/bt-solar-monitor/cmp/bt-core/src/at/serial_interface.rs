@@ -2,7 +2,7 @@ use heapless::format;
 use nom::{Parser, bytes::complete::tag};
 
 use crate::{
-    at::{AtClient, AtError},
+    at::{AtClient, AtController, AtError},
     at_request,
 };
 
@@ -26,19 +26,19 @@ impl TryFrom<u32> for SleepMode {
     }
 }
 
-pub async fn set_sleep_mode(client: &impl AtClient, mode: SleepMode) -> Result<(), AtError> {
+pub async fn set_sleep_mode<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>, mode: SleepMode) -> Result<(), AtError> {
     at_request!("AT+CSCLK={}", mode as i32).send(client).await?;
     Ok(())
 }
 
-pub async fn read_sleep_mode(client: &impl AtClient) -> Result<SleepMode, AtError> {
+pub async fn read_sleep_mode<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>) -> Result<SleepMode, AtError> {
     let response = at_request!("AT+CSCLK?").send(client).await?;
     let (_, (_, mode)) = (tag("+CSCLK: "), nom::character::complete::u32).parse(response.line(0)?)?;
     mode.try_into()
 }
 
 #[cfg(test)]
-pub mod mocks {
+pub mod tests {
 
     use super::*;
     use crate::at::mocks::mock_request;

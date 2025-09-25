@@ -2,55 +2,30 @@ use core::str::{self};
 
 use embassy_time::{Duration, Timer, WithTimeout};
 use embedded_hal::digital::OutputPin;
-use embedded_io_async::{Read, Write};
+use embedded_io_async::Read;
 
 use crate::{
-    at::{AtHttpReadRequest, AtHttpWriteRequest, http::HttpStatusCode, serial_interface::SleepMode, status_control::Rssi},
+    at::{AtClient, AtController, http::HttpStatusCode, serial_interface::SleepMode, status_control::Rssi},
     net::cellular::CellularError,
 };
 
-pub struct State {
-    at_state: crate::at::State,
-}
-
-impl State {
-    pub fn new() -> Self {
-        Self {
-            at_state: crate::at::State::new(),
-        }
-    }
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub async fn new<'a, S: Read + Write, Output: OutputPin>(
-    state: &'a mut State,
-    stream: S,
-    pwrkey: Output,
-    reset: Output,
-) -> (CellularModule<'a, Output>, crate::at::Runner<'a, S>) {
-    let runner = crate::at::Runner::new(stream, state.at_state.tx_channel.receiver(), state.at_state.rx_channel.sender());
-    let lte = CellularModule {
-        at_client: crate::at::AtClientImpl::new(state.at_state.tx_channel.sender(), state.at_state.rx_channel.receiver()),
-        pwrkey,
-        reset,
-        http_initialized: false,
-    };
-    (lte, runner)
-}
-
-pub struct CellularModule<'ch, Output: OutputPin> {
-    at_client: crate::at::AtClientImpl<'ch>,
+pub struct CellularModule<'ch, Output: OutputPin, Ctr: AtController> {
+    at_client: crate::at::AtClientImpl<'ch, Ctr>,
     pwrkey: Output,
     reset: Output,
     http_initialized: bool,
 }
 
-impl<Output: OutputPin> CellularModule<'_, Output> {
+impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule<'ch, Output, Ctr> {
+    pub fn new(at_client: crate::at::AtClientImpl<'ch, Ctr>, pwrkey: Output, reset: Output) -> Self {
+        CellularModule {
+            at_client,
+            pwrkey,
+            reset,
+            http_initialized: false,
+        }
+    }
+
     pub async fn is_alive(&self) -> bool {
         crate::at::at(&self.at_client).await.is_ok()
     }
@@ -129,7 +104,7 @@ impl<Output: OutputPin> CellularModule<'_, Output> {
             .map_err(Into::into)
     }
 
-    pub async fn request(&mut self) -> Result<HttpRequest<'_, '_>, CellularError> {
+    pub async fn request(&mut self) -> Result<HttpRequest<'_, '_, Ctr>, CellularError> {
         if !self.http_initialized {
             crate::at::http::init(&self.at_client).await?;
             self.http_initialized = true;
@@ -138,24 +113,22 @@ impl<Output: OutputPin> CellularModule<'_, Output> {
     }
 }
 
-pub struct HttpRequest<'m, 'ch> {
-    at_client: &'m crate::at::AtClientImpl<'ch>,
+pub struct HttpRequest<'m, 'ch, Ctr: AtController> {
+    at_client: &'m crate::at::AtClientImpl<'ch, Ctr>,
 }
 
-impl<'m, 'ch> HttpRequest<'m, 'ch> {
-    async fn new(at_client: &'m crate::at::AtClientImpl<'ch>) -> Result<Self, CellularError> {
+impl<'m, 'ch, Ctr: AtController> HttpRequest<'m, 'ch, Ctr> {
+    async fn new(at_client: &'m crate::at::AtClientImpl<'ch, Ctr>) -> Result<Self, CellularError> {
         Ok(Self { at_client })
     }
 
-    pub async fn set_url(&self, url: &str) -> Result<(), CellularError> {
-        crate::at::http::set_url(self.at_client, url).await.map_err(Into::into)
+    pub async fn set_header(&self, header: &str, value: &str) -> Result<&HttpRequest<'m, 'ch, Ctr>, CellularError> {
+        crate::at::http::set_header(self.at_client, header, value).await?;
+        Ok(self)
     }
 
-    pub fn body(&self) -> HttpRequestBody<'_, '_> {
-        HttpRequestBody::new(self.at_client)
-    }
-
-    pub async fn get(&self) -> Result<HttpResponse<'_, '_>, CellularError> {
+    pub async fn get(&self, url: &str) -> Result<HttpResponse<'_, '_, Ctr>, CellularError> {
+        crate::at::http::set_url(self.at_client, url).await?;
         crate::at::http::action(self.at_client, crate::at::http::HttpAction::Get)
             .await
             .map_err(Into::into)
@@ -165,7 +138,9 @@ impl<'m, 'ch> HttpRequest<'m, 'ch> {
             })
     }
 
-    pub async fn post(&self) -> Result<HttpResponse<'_, '_>, CellularError> {
+    pub async fn post(&self, url: &str, body: &[u8]) -> Result<HttpResponse<'_, '_, Ctr>, CellularError> {
+        crate::at::http::set_url(self.at_client, url).await?;
+        self.at_client.use_controller(async |ctr| ctr.handle_http_write(body).await).await?;
         crate::at::http::action(self.at_client, crate::at::http::HttpAction::Post)
             .await
             .map_err(Into::into)
@@ -176,50 +151,29 @@ impl<'m, 'ch> HttpRequest<'m, 'ch> {
     }
 }
 
-pub struct HttpRequestBody<'m, 'ch> {
-    at_client: &'m crate::at::AtClientImpl<'ch>,
-}
-
-impl<'m, 'ch> HttpRequestBody<'m, 'ch> {
-    fn new(at_client: &'m crate::at::AtClientImpl<'ch>) -> Self {
-        Self { at_client }
-    }
-}
-
-impl<'m, 'ch> Write for HttpRequestBody<'m, 'ch> {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        AtHttpWriteRequest::new(buf)?.send(self.at_client).await?;
-        Ok(buf.len())
-    }
-}
-
-impl<'m, 'ch> embedded_io_async::ErrorType for HttpRequestBody<'m, 'ch> {
-    type Error = CellularError;
-}
-
-pub struct HttpResponse<'m, 'ch> {
+pub struct HttpResponse<'m, 'ch, Ctr: AtController> {
     status: HttpStatusCode,
-    body: HttpResponseBody<'m, 'ch>,
+    body: HttpResponseBody<'m, 'ch, Ctr>,
 }
 
-impl<'m, 'ch> HttpResponse<'m, 'ch> {
+impl<'m, 'ch, Ctr: AtController> HttpResponse<'m, 'ch, Ctr> {
     pub fn status(&self) -> HttpStatusCode {
         self.status
     }
 
-    pub fn body(&mut self) -> &mut HttpResponseBody<'m, 'ch> {
+    pub fn body(&mut self) -> &mut HttpResponseBody<'m, 'ch, Ctr> {
         &mut self.body
     }
 }
 
-pub struct HttpResponseBody<'m, 'ch> {
-    at_client: &'m crate::at::AtClientImpl<'ch>,
+pub struct HttpResponseBody<'m, 'ch, Ctr: AtController> {
+    at_client: &'m crate::at::AtClientImpl<'ch, Ctr>,
     len: usize,
     pos: usize,
 }
 
-impl<'m, 'ch> HttpResponseBody<'m, 'ch> {
-    fn new(at_client: &'m crate::at::AtClientImpl<'ch>, len: usize) -> Self {
+impl<'m, 'ch, Ctr: AtController> HttpResponseBody<'m, 'ch, Ctr> {
+    fn new(at_client: &'m crate::at::AtClientImpl<'ch, Ctr>, len: usize) -> Self {
         Self { at_client, len, pos: 0 }
     }
 
@@ -230,25 +184,46 @@ impl<'m, 'ch> HttpResponseBody<'m, 'ch> {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
+
+    pub async fn read_to_end(&mut self, mut buf: &mut [u8]) -> Result<usize, CellularError> {
+        let mut total_read = 0;
+        while !buf.is_empty() {
+            match self.read(buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    buf = &mut buf[n..];
+                    total_read += n;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(total_read)
+    }
+
+    pub async fn read_as_str<'a>(&mut self, buf: &'a mut [u8]) -> Result<&'a str, CellularError> {
+        let n = self.read_to_end(buf).await?;
+        str::from_utf8(&buf[..n]).map_err(|_| {
+            error!("http body not utf8");
+            CellularError::AtError(crate::at::AtError::Error)
+        })
+    }
 }
 
-impl<'m, 'ch> Read for HttpResponseBody<'m, 'ch> {
+impl<'m, 'ch, Ctr: AtController> Read for HttpResponseBody<'m, 'ch, Ctr> {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         let remaining = self.len - self.pos;
         if remaining == 0 {
             return Ok(0);
         }
-
-        let requested = core::cmp::min(remaining, buf.len());
-        let read = core::cmp::min(requested, crate::at::MAX_READ_BUFFER_SIZE);
-        let request = AtHttpReadRequest::new(self.pos, read);
-        let mut response = request.send(self.at_client).await?;
-        let len = response.read(buf)?;
+        let len = core::cmp::min(remaining, buf.len());
+        self.at_client
+            .use_controller(async |ctr| ctr.handle_http_read(&mut buf[0..len], self.pos).await)
+            .await?;
         self.pos += len;
         Ok(len)
     }
 }
 
-impl<'m, 'ch> embedded_io_async::ErrorType for HttpResponseBody<'m, 'ch> {
+impl<'m, 'ch, Ctr: AtController> embedded_io_async::ErrorType for HttpResponseBody<'m, 'ch, Ctr> {
     type Error = CellularError;
 }

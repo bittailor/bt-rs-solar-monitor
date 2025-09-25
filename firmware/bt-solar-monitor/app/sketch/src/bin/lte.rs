@@ -1,7 +1,9 @@
 #![no_std]
 #![no_main]
 
+use bt_core::at::AtController;
 use bt_core::net::cellular::CellularError;
+use bt_core::net::cellular::sim_com_a67::CellularModule;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
@@ -11,7 +13,6 @@ use embassy_rp::peripherals::UART0;
 use embassy_rp::uart::{self, BufferedInterruptHandler, BufferedUart};
 use embassy_time::Timer;
 use embedded_hal::digital::OutputPin;
-use embedded_io_async::{Read, Write};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -34,8 +35,16 @@ async fn main(_spawner: Spawner) {
     let rx_buf = &mut RX_BUF.init([0; 1024])[..];
     let uart: BufferedUart = BufferedUart::new(uart, tx_pin, rx_pin, Irqs, tx_buf, rx_buf, uart::Config::default());
 
-    let mut lte_state = bt_core::net::cellular::sim_com_a67::State::new();
-    let (mut lte, lte_runner) = bt_core::net::cellular::sim_com_a67::new(&mut lte_state, uart, pwrkey, reset).await;
+    let mut at_state = bt_core::at::State::new();
+    let (at_runner, at_client) = bt_core::at::new(&mut at_state, uart);
+    let mut lte = CellularModule::new(at_client, pwrkey, reset);
+
+    let sequence = async {
+        match lte_sequence(&mut lte).await {
+            Ok(_) => info!("LTE commands done"),
+            Err(e) => error!("LTE commands error: {:?}", e),
+        }
+    };
 
     let blinky = async {
         loop {
@@ -47,17 +56,12 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    let sequenc = async {
-        match lte_sequence(&mut lte).await {
-            Ok(_) => info!("LTE commands done"),
-            Err(e) => error!("LTE commands error: {:?}", e),
-        }
-    };
-
-    join3(blinky, lte_runner.run(), sequenc).await;
+    join3(blinky, at_runner.run(), sequence).await;
 }
 
-async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin>) -> Result<(), CellularError> {
+async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin, impl AtController>) -> Result<(), CellularError> {
+    info!("start LTE sequence");
+
     lte.power_cycle().await?;
 
     lte.set_apn("gprs.swisscom.ch").await?;
@@ -69,9 +73,9 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     }
     info!("network registered!");
 
+    /*
     let get_request = lte.request().await?;
-    get_request.set_url("http://api.solar.bockmattli.ch/api/v1/solar").await?;
-    let mut get_response = get_request.get().await?;
+    let mut get_response = get_request.get("http://api.solar.bockmattli.ch/api/v1/solar").await?;
     info!("http get done: status={:?} len={}", get_response.status(), get_response.body().len());
     if get_response.status().is_ok() {
         let mut buf = [0u8; 1024];
@@ -92,12 +96,9 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     }
 
     let post_request = lte.request().await?;
-    post_request.set_url("http://api.solar.bockmattli.ch/api/v1/solar").await?;
-    post_request
-        .body()
-        .write_all(b"{\"device\":\"test-device\",\"power\":123,\"energy\":456}")
+    let mut post_response = post_request
+        .post("http://api.solar.bockmattli.ch/api/v1/solar", b"{\"device\":\"test-device\",\"power\":123,\"energy\":456}")
         .await?;
-    let mut post_response = post_request.post().await?;
     info!("http post done: status={:?} len={}", post_response.status(), post_response.body().len());
     if post_response.status().is_ok() {
         let mut buf = [0u8; 1024];
@@ -118,11 +119,9 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     }
 
     let multi_post_request = lte.request().await?;
-    multi_post_request.set_url("http://api.solar.bockmattli.ch/api/v1/solar").await?;
-    multi_post_request.body().write_all(b"<one>").await?;
-    multi_post_request.body().write_all(b"<two>").await?;
-    multi_post_request.body().write_all(b"<three>").await?;
-    let mut post_response = multi_post_request.post().await?;
+    let mut post_response = multi_post_request
+        .post("http://api.solar.bockmattli.ch/api/v1/solar", b"<one> <two> <three>")
+        .await?;
     info!("http post done: status={:?} len={}", post_response.status(), post_response.body().len());
     if post_response.status().is_ok() {
         let mut buf = [0u8; 1024];
@@ -141,6 +140,33 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     } else {
         error!("http post failed: code={}", post_response.status());
     }
+    */
+
+    let mut buf = [0u8; 1024];
+
+    let response = lte
+        .request()
+        .await?
+        .set_header("x-access-token", "1234")
+        .await?
+        .set_header("bt-token", "hdsjhidqdveu672676")
+        .await?
+        .get("http://api.solar.bockmattli.ch/api/v1/solar/headers")
+        .await?
+        .body()
+        .read_as_str(&mut buf)
+        .await?;
+    info!("http get response => '{}'", response);
+
+    let response = lte
+        .request()
+        .await?
+        .post("http://api.solar.bockmattli.ch/api/v1/solar", b"{\"device\":\"test-device\",\"power\":123,\"energy\":456}")
+        .await?
+        .body()
+        .read_as_str(&mut buf)
+        .await?;
+    info!("http post response: '{}'", response);
 
     info!("wait 10s before power off ...");
     Timer::after_secs(10).await;

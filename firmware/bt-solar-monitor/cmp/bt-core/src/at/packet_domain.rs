@@ -1,9 +1,9 @@
 use crate::{
+    at::{AtClient, AtController, AtError},
     at_request,
-    at::{AtClient, AtError},
 };
 
-pub async fn set_apn(client: &impl AtClient, apn: &str) -> Result<(), AtError> {
+pub async fn set_apn<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>, apn: &str) -> Result<(), AtError> {
     at_request!("AT+CGDCONT=1,\"IP\",\"{}\"", apn).send(client).await?;
     Ok(())
 }
