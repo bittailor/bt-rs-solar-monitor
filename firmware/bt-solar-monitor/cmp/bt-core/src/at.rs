@@ -229,7 +229,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
                                 self.sender.send(Ok(AtResponseMessage::Ok)).await;
                             }
                             AtRequestMessage::ReleaseAtController => {
-                                warn!("ReleaseAtController while not aquired");
+                                warn!("ReleaseAtController while not acquired");
                                 self.sender.send(Ok(AtResponseMessage::Ok)).await;
                             }
                         },
