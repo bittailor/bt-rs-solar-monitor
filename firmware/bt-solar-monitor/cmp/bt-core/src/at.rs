@@ -241,7 +241,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
                     trace!("AT runner loop: handle {:?}", next);
                     match next {
                         AtRequestMessage::AcquireAtController => {
-                            warn!("AquireAtController while already aquired");
+                            warn!("AcquireAtController while already acquired");
                             self.sender.send(Ok(AtResponseMessage::Ok)).await;
                         }
                         AtRequestMessage::ReleaseAtController => {
