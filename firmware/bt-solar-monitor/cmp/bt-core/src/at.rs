@@ -127,7 +127,7 @@ impl Default for AtCommandResponse {
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 enum AtRequestMessage {
-    AquireAtController,
+    AcquireAtController,
     ReleaseAtController,
 }
 
@@ -224,7 +224,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
                     trace!("AT runner loop: handle {:?}", next);
                     match next {
                         embassy_futures::select::Either::First(request) => match request {
-                            AtRequestMessage::AquireAtController => {
+                            AtRequestMessage::AcquireAtController => {
                                 state = State::AtControllerAquired;
                                 self.sender.send(Ok(AtResponseMessage::Ok)).await;
                             }
@@ -240,7 +240,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
                     let next = self.receiver.receive().await;
                     trace!("AT runner loop: handle {:?}", next);
                     match next {
-                        AtRequestMessage::AquireAtController => {
+                        AtRequestMessage::AcquireAtController => {
                             warn!("AquireAtController while already aquired");
                             self.sender.send(Ok(AtResponseMessage::Ok)).await;
                         }
@@ -289,7 +289,7 @@ impl<'ch, Ctr: AtController> AtClient<'ch, Ctr> for AtClientImpl<'ch, Ctr> {
         F: AsyncFnMut(&mut Ctr) -> R + 'a,
         Ctr: 'a,
     {
-        self.tx.send(AtRequestMessage::AquireAtController).await;
+        self.tx.send(AtRequestMessage::AcquireAtController).await;
         let _ = self.rx.receive().await;
         let mut ctr = self.at_controller.inner().await;
         let response = f(&mut ctr).await;
