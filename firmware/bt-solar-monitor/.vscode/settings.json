@@ -1,8 +1,8 @@
 {
-    "rust-analyzer.cargo.target": "thumbv8m.main-none-eabihf",
+    "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
     "rust-analyzer.cargo.allTargets": false,
     "rust-analyzer.runnables.extraArgs": [
-        "--target", "aarch64-apple-darwin"
+        "--target",
+        "aarch64-apple-darwin"
     ],
-
 }

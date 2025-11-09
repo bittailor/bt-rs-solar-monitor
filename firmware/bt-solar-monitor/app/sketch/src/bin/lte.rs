@@ -7,33 +7,33 @@ use bt_core::net::cellular::sim_com_a67::CellularModule;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
-use embassy_rp::bind_interrupts;
-use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::UART0;
-use embassy_rp::uart::{self, BufferedInterruptHandler, BufferedUart};
+use embassy_nrf::{
+    bind_interrupts,
+    buffered_uarte::{self, BufferedUarte},
+    gpio::{Level, Output, OutputDrive},
+    peripherals, uarte,
+};
 use embassy_time::Timer;
 use embedded_hal::digital::OutputPin;
-use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
-    UART0_IRQ => BufferedInterruptHandler<UART0>;
+    UARTE0 => buffered_uarte::InterruptHandler<peripherals::UARTE0>;
 });
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let p = embassy_rp::init(Default::default());
-    let mut led = Output::new(p.PIN_25, Level::Low);
-    let reset = Output::new(p.PIN_16, Level::High);
-    let pwrkey = Output::new(p.PIN_17, Level::High);
+    let p = embassy_nrf::init(Default::default());
+    let mut led = Output::new(p.P1_12, Level::Low, OutputDrive::Standard);
+    let reset = Output::new(p.P0_03, Level::Low, OutputDrive::Standard);
+    let pwrkey = Output::new(p.P0_04, Level::Low, OutputDrive::Standard);
 
-    let (tx_pin, rx_pin, uart) = (p.PIN_0, p.PIN_1, p.UART0);
-
-    static TX_BUF: StaticCell<[u8; 1024]> = StaticCell::new();
-    let tx_buf = &mut TX_BUF.init([0; 1024])[..];
-    static RX_BUF: StaticCell<[u8; 1024]> = StaticCell::new();
-    let rx_buf = &mut RX_BUF.init([0; 1024])[..];
-    let uart: BufferedUart = BufferedUart::new(uart, tx_pin, rx_pin, Irqs, tx_buf, rx_buf, uart::Config::default());
+    let mut config = uarte::Config::default();
+    config.parity = uarte::Parity::EXCLUDED;
+    config.baudrate = uarte::Baudrate::BAUD115200;
+    let mut tx_buffer = [0u8; 4096];
+    let mut rx_buffer = [0u8; 4096];
+    let uart = BufferedUarte::new(p.UARTE0, p.TIMER0, p.PPI_CH0, p.PPI_CH1, p.PPI_GROUP0, p.P0_08, p.P0_06, Irqs, config, &mut rx_buffer, &mut tx_buffer);
 
     let mut at_state = bt_core::at::State::new();
     let (at_runner, at_client) = bt_core::at::new(&mut at_state, uart);
