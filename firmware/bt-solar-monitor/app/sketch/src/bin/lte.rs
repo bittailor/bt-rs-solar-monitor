@@ -168,15 +168,15 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
         .await?;
     info!("http post response: '{}'", response);
 
+    /*
     info!("wait 10s before power off ...");
     Timer::after_secs(10).await;
     info!("... power off ...");
     lte.power_down().await?;
     info!("... power off done");
-
     Ok(())
+    */
 
-    /*
     loop {
         let rssi = lte.query_signal_quality().await?;
         info!(" -> rssi: {}", rssi);
@@ -186,7 +186,7 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
         lte.set_sleep_mode(bt_core::at::serial_interface::SleepMode::RxSleep).await?;
         info!("... wait a bit in sleep mode ...");
         Timer::after_secs(30).await;
-        while lte.at().await.is_err() {
+        while !lte.is_alive().await {
             error!("LTE module not responding to AT command, retrying...");
         }
         info!("check network registration again");
@@ -196,5 +196,4 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
             info!("... retrying ...");
         }
     }
-    */
 }
