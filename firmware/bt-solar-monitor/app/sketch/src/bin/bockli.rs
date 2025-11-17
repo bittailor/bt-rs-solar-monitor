@@ -19,6 +19,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     UARTE0 => buffered_uarte::InterruptHandler<peripherals::UARTE0>;
+    UARTE1 => buffered_uarte::InterruptHandler<peripherals::UARTE1>;
 });
 
 #[embassy_executor::main]
@@ -51,6 +52,26 @@ async fn main(_spawner: Spawner) {
     let (at_runner, at_client) = bt_core::at::new(&mut at_state, uart_lte);
     let mut lte = CellularModule::new(at_client, pwrkey, reset);
 
+    let mut uart_ve_config = uarte::Config::default();
+    uart_ve_config.parity = uarte::Parity::EXCLUDED;
+    uart_ve_config.baudrate = uarte::Baudrate::BAUD19200;
+    let mut uart_ve_tx_buffer = [0u8; 256];
+    let mut uart_ve_rx_buffer = [0u8; 256];
+    let uart_ve = BufferedUarte::new(
+        p.UARTE1,
+        p.TIMER1,
+        p.PPI_CH2,
+        p.PPI_CH3,
+        p.PPI_GROUP1,
+        p.P1_10,
+        p.P1_08,
+        Irqs,
+        uart_ve_config,
+        &mut uart_ve_rx_buffer,
+        &mut uart_ve_tx_buffer,
+    );
+    let ve_direct_runner = bt_core::sensor::ve_direct::new(uart_ve);
+
     let sequence = async {
         match lte_sequence(&mut lte).await {
             Ok(_) => info!("LTE commands done"),
@@ -68,7 +89,7 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    join3(at_runner.run(), blinky, sequence).await;
+    join4(at_runner.run(), ve_direct_runner.run(), blinky, sequence).await;
 }
 
 async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin, impl AtController>) -> Result<(), CellularError> {

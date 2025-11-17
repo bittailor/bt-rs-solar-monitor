@@ -3,48 +3,66 @@
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_rp::{bind_interrupts, gpio, peripherals::UART0, uart};
-use embassy_time::Timer;
-use gpio::{Level, Output};
+use embassy_futures::join::*;
+use embassy_nrf::{
+    bind_interrupts,
+    buffered_uarte::{self, BufferedUarte},
+    gpio::{Level, Output, OutputDrive},
+    peripherals, uarte,
+};
+use embassy_time::{Duration, Timer, with_timeout};
 use {defmt_rtt as _, panic_probe as _};
 
-// Program metadata for `picotool info`.
-// This isn't needed, but it's recomended to have these minimal entries.
-#[unsafe(link_section = ".bi_entries")]
-#[used]
-pub static PICOTOOL_ENTRIES: [embassy_rp::binary_info::EntryAddr; 4] = [
-    embassy_rp::binary_info::rp_program_name!(c"Blinky Example"),
-    embassy_rp::binary_info::rp_program_description!(
-        c"This example tests the RP Pico on board LED, connected to gpio 25"
-    ),
-    embassy_rp::binary_info::rp_cargo_version!(),
-    embassy_rp::binary_info::rp_program_build_attribute!(),
-];
-
-bind_interrupts!(pub struct Irqs {
-    UART0_IRQ  => uart::InterruptHandler<UART0>;
+bind_interrupts!(struct Irqs {
+    UARTE0 => buffered_uarte::InterruptHandler<peripherals::UARTE0>;
 });
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    let p = embassy_rp::init(Default::default());
-    let mut led = Output::new(p.PIN_25, Level::Low);
+    let p = embassy_nrf::init(Default::default());
+    let mut led = Output::new(p.P1_12, Level::Low, OutputDrive::Standard);
 
-    let config = uart::Config::default();
-    let (uart, tx_pin, tx_dma, rx_pin, rx_dma) = (p.UART0, p.PIN_0, p.DMA_CH0, p.PIN_1, p.DMA_CH1);
-    let mut uart = uart::Uart::new(uart, tx_pin, rx_pin, Irqs, tx_dma, rx_dma, config);
+    let mut config = uarte::Config::default();
+    config.parity = uarte::Parity::EXCLUDED;
+    config.baudrate = uarte::Baudrate::BAUD115200;
+    let mut tx_buffer = [0u8; 4096];
+    let mut rx_buffer = [0u8; 4096];
+    let mut uart = BufferedUarte::new(p.UARTE0, p.TIMER0, p.PPI_CH0, p.PPI_CH1, p.PPI_GROUP0, p.P0_08, p.P0_06, Irqs, config, &mut rx_buffer, &mut tx_buffer);
 
-    loop {
-        info!("led on!");
-        led.set_high();
-        Timer::after_millis(250).await;
+    let blinky = async {
+        info!("blinky loop start");
+        loop {
+            led.set_high();
+            Timer::after_millis(250).await;
+            led.set_low();
+            Timer::after_millis(250).await;
+        }
+    };
 
-        info!("led off!");
-        led.set_low();
-        Timer::after_millis(250).await;
-        match uart.write("hello there!\r\n".as_bytes()).await {
+    let uart_task = async {
+        match uart.write("Wait for input to echo!\r\n".as_bytes()).await {
             Ok(_) => info!("Write successful"),
             Err(e) => error!("Write failed: {}", e),
         }
-    }
+        loop {
+            let mut buf = [0u8; 1024];
+            match with_timeout(Duration::from_secs(20), uart.read(&mut buf)).await {
+                Ok(Ok(len)) => {
+                    info!("Echo back {} bytes", len);
+                    match uart.write(&buf[..len]).await {
+                        Ok(_) => info!("Write echo successful"),
+                        Err(e) => error!("Write echo failed: {}", e),
+                    }
+                }
+                Ok(Err(e)) => {
+                    error!("Uart read failed: {}", e);
+                }
+                Err(_) => match uart.write("Wait for input to echo!\r\n".as_bytes()).await {
+                    Ok(_) => info!("Write successful"),
+                    Err(e) => error!("Write failed: {}", e),
+                },
+            };
+        }
+    };
+    join(blinky, uart_task).await;
 }

@@ -6,7 +6,7 @@
             "type": "probe-rs-debug",
             "request": "launch",
             "name": "probe_rs Executable Test",
-            "chip": "RP235x",
+            "chip": "nRF52840_xxAA",
             "flashingConfig": {
                 "flashingEnabled": true,
                 "haltAfterReset": true,
