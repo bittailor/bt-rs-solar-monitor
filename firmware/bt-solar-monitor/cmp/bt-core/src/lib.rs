@@ -4,3 +4,18 @@ pub(crate) mod fmt;
 
 pub mod at;
 pub mod net;
+pub mod sensor;
+
+#[cfg(test)]
+pub mod tests {
+
+    #[ctor::ctor]
+    fn init() {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_thread_names(true)
+            .with_level(true)
+            .pretty()
+            .init();
+    }
+}

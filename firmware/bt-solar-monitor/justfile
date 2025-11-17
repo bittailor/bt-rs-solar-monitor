@@ -4,7 +4,7 @@ clippy:
     cargo clippy
 
 host_test:
-    cargo test --target aarch64-apple-darwin --workspace --exclude sketch
+    cargo test --features log --target aarch64-apple-darwin --workspace --exclude sketch
 
 build:
     cargo build --release
