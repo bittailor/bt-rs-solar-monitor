@@ -1,10 +1,55 @@
 #![cfg_attr(target_os = "none", no_std)]
 
+use embassy_sync::{
+    blocking_mutex::raw::RawMutex,
+    mutex::{Mutex, MutexGuard},
+};
+
 pub(crate) mod fmt;
 
 pub mod at;
 pub mod net;
 pub mod sensor;
+
+struct LoggingMutexGuard<'a, M, T>
+where
+    M: RawMutex,
+    T: ?Sized,
+{
+    guard: Option<MutexGuard<'a, M, T>>,
+    tag: &'static str,
+}
+
+impl<'a, M: RawMutex, T: ?Sized> LoggingMutexGuard<'a, M, T> {
+    pub async fn new(mutex: &'a Mutex<M, T>, tag: &'static str) -> Self {
+        debug!("Mutex[{}] acquire ..", tag);
+        let guard = mutex.lock().await;
+        debug!("Mutex[{}] .. acquired", tag);
+        Self { guard: Some(guard), tag }
+    }
+}
+
+impl<'a, M: RawMutex, T: ?Sized> core::ops::Deref for LoggingMutexGuard<'a, M, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.guard.as_ref().unwrap()
+    }
+}
+
+impl<'a, M: RawMutex, T: ?Sized> core::ops::DerefMut for LoggingMutexGuard<'a, M, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.guard.as_mut().unwrap()
+    }
+}
+
+impl<'a, M: RawMutex, T: ?Sized> Drop for LoggingMutexGuard<'a, M, T> {
+    fn drop(&mut self) {
+        debug!("Mutex[{}] releasing ..", self.tag);
+        drop(self.guard.take().unwrap());
+        debug!("Mutex[{}] .. released", self.tag);
+    }
+}
 
 #[cfg(test)]
 pub mod tests {

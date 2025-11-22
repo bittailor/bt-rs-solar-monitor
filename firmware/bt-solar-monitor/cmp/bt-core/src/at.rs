@@ -18,6 +18,8 @@ use embassy_time::{Duration, with_timeout};
 use embedded_io_async::{Read, Write};
 use heapless::{CapacityError, String, Vec};
 
+use crate::LoggingMutexGuard;
+
 pub const ERROR_STRING_SIZE: usize = 64;
 const CHANNEL_SIZE: usize = 2;
 const AT_BUFFER_SIZE: usize = 256;
@@ -220,7 +222,7 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
             match state {
                 State::UrcPoll => {
                     let next = {
-                        let mut ctr = self.at_controller.inner().await;
+                        let mut ctr = self.at_controller.inner("urc_poll").await;
                         select(self.receiver.receive(), ctr.poll_urc()).await
                     };
                     trace!("AT runner loop: handle {:?}", next);
@@ -293,7 +295,7 @@ impl<'ch, Ctr: AtController> AtClient<'ch, Ctr> for AtClientImpl<'ch, Ctr> {
     {
         self.tx.send(AtRequestMessage::AcquireAtController).await;
         let _ = self.rx.receive().await;
-        let mut ctr = self.at_controller.inner().await;
+        let mut ctr = self.at_controller.inner("at_rx").await;
         let response = f(&mut ctr).await;
         drop(ctr);
         self.tx.send(AtRequestMessage::ReleaseAtController).await;
@@ -313,8 +315,8 @@ impl<'ch, Ctr: AtController> Clone for AtControllerHandle<'ch, Ctr> {
 }
 
 impl<'ch, Ctr: AtController> AtControllerHandle<'ch, Ctr> {
-    async fn inner(&self) -> embassy_sync::mutex::MutexGuard<'_, NoopRawMutex, Ctr> {
-        self.inner.lock().await
+    async fn inner(&self, tag: &'static str) -> LoggingMutexGuard<'_, NoopRawMutex, Ctr> {
+        LoggingMutexGuard::new(self.inner, tag).await
     }
 }
 

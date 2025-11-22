@@ -27,7 +27,7 @@ pub fn new<Stream: Read + Write>(stream: Stream) -> Runner<Stream> {
     }
 }
 
-const STRING_BUFFER_SIZE: usize = 64;
+const STRING_BUFFER_SIZE: usize = 32;
 const MAX_MESSAGES: usize = 20;
 
 struct FrameHandler<Stream: Read> {
