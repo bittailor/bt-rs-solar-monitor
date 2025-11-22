@@ -85,6 +85,9 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     }
     info!("network registered!");
 
+    let rtc = lte.query_real_time_clock().await?;
+    info!("real time clock: {}", rtc);
+
     let mut buf = [0u8; 1024];
 
     let response = lte
@@ -114,6 +117,10 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     loop {
         let rssi = lte.query_signal_quality().await?;
         info!(" -> rssi: {}", rssi);
+
+        let rtc = lte.query_real_time_clock().await?;
+        info!("real time clock: {}", rtc);
+
         Timer::after_secs(10).await;
 
         info!("Set sleep mode");

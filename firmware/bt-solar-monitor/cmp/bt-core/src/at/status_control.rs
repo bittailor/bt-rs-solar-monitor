@@ -2,8 +2,11 @@ use crate::{
     at::{AtClient, AtController, AtError},
     at_request,
 };
-use heapless::format;
-use nom::{Parser, bytes::complete::tag};
+use heapless::{String, format};
+use nom::{
+    Parser,
+    bytes::complete::{is_not, tag},
+};
 
 pub struct Rssi(i32);
 
@@ -43,4 +46,27 @@ pub async fn query_signal_quality<'ch, Ctr: AtController>(ctr: &impl AtClient<'c
 pub async fn power_down<'ch, Ctr: AtController>(ctr: &impl AtClient<'ch, Ctr>) -> Result<(), AtError> {
     at_request!("AT+CPOF").send(ctr).await?;
     Ok(())
+}
+
+// AT+CCLK?
+// +CCLK: "14/01/01,02:14:36+08"
+pub async fn query_real_time_clock<'ch, Ctr: AtController>(ctr: &impl AtClient<'ch, Ctr>) -> Result<String<64>, AtError> {
+    let response = at_request!("AT+CCLK?").send(ctr).await?;
+    //let (_, (_, time, _)) = (tag("+CCLK: \""), nom::character::complete::alphanumeric1, tag("\"")).parse(response.line(0)?)?;
+    let (_, (_, time, _)) = (tag("+CCLK: \""), is_not("\""), tag("\"")).parse(response.line(0)?)?;
+    Ok(time.try_into()?)
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::at::mocks::mock_request;
+
+    #[tokio::test]
+    async fn test_query_real_time_clock() -> Result<(), AtError> {
+        let mock = mock_request("AT+CCLK?", &["+CCLK: \"70/01/01,00:00:10+00\""]);
+        let time = query_real_time_clock(&mock).await?;
+        assert_eq!(time, "70/01/01,00:00:10+00");
+        Ok(())
+    }
 }

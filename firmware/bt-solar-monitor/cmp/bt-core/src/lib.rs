@@ -9,7 +9,7 @@ pub mod sensor;
 #[cfg(test)]
 pub mod tests {
 
-    #[ctor::ctor]
+    #[cfg_attr(feature = "log", ctor::ctor)]
     fn init() {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::INFO)

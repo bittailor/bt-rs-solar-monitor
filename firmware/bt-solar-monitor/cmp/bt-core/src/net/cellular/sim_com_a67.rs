@@ -3,6 +3,7 @@ use core::str::{self};
 use embassy_time::{Duration, Timer, WithTimeout};
 use embedded_hal::digital::OutputPin;
 use embedded_io_async::Read;
+use heapless::String;
 
 use crate::{
     at::{AtClient, AtController, http::HttpStatusCode, serial_interface::SleepMode, status_control::Rssi},
@@ -50,6 +51,7 @@ impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule<'ch, Output, Ctr>
         info!("... check AT ...");
         self.ensure_at(Duration::from_secs(10)).await?;
         info!("... power on done");
+        crate::at::network::set_automatic_time_and_time_zone_update(&self.at_client, true).await?;
         Ok(())
     }
 
@@ -86,6 +88,10 @@ impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule<'ch, Output, Ctr>
         &self,
     ) -> Result<(crate::at::network::NetworkRegistrationUrcConfig, crate::at::network::NetworkRegistrationState), CellularError> {
         crate::at::network::get_network_registration(&self.at_client).await.map_err(Into::into)
+    }
+
+    pub async fn query_real_time_clock(&self) -> Result<String<64>, CellularError> {
+        crate::at::status_control::query_real_time_clock(&self.at_client).await.map_err(Into::into)
     }
 
     // AT+CSCLK

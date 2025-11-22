@@ -43,6 +43,8 @@ impl From<core::fmt::Error> for AtError {
 
 impl From<nom::Err<nom::error::Error<&str>>> for AtError {
     fn from(_err: nom::Err<nom::error::Error<&str>>) -> Self {
+        #[cfg(feature = "log")]
+        debug!("Parsing error {:?} => AtError", _err);
         AtError::Error
     }
 }

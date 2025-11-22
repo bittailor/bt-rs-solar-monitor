@@ -75,6 +75,13 @@ pub async fn get_network_registration<'ch, Ctr: AtController>(
     Ok((n.try_into()?, stat.try_into()?))
 }
 
+// AT+CTZU=<on/off>
+//
+pub async fn set_automatic_time_and_time_zone_update<'ch, Ctr: AtController>(ctr: &impl AtClient<'ch, Ctr>, enable: bool) -> Result<(), AtError> {
+    at_request!("AT+CTZU={}", if enable { 1 } else { 0 }).send(ctr).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
