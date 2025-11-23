@@ -22,9 +22,9 @@ where
 
 impl<'a, M: RawMutex, T: ?Sized> LoggingMutexGuard<'a, M, T> {
     pub async fn new(mutex: &'a Mutex<M, T>, tag: &'static str) -> Self {
-        debug!("Mutex[{}] acquire ..", tag);
+        trace!("Mutex[{}] acquire ..", tag);
         let guard = mutex.lock().await;
-        debug!("Mutex[{}] .. acquired", tag);
+        trace!("Mutex[{}] .. acquired", tag);
         Self { guard: Some(guard), tag }
     }
 }
@@ -45,9 +45,9 @@ impl<'a, M: RawMutex, T: ?Sized> core::ops::DerefMut for LoggingMutexGuard<'a, M
 
 impl<'a, M: RawMutex, T: ?Sized> Drop for LoggingMutexGuard<'a, M, T> {
     fn drop(&mut self) {
-        debug!("Mutex[{}] releasing ..", self.tag);
+        trace!("Mutex[{}] releasing ..", self.tag);
         drop(self.guard.take().unwrap());
-        debug!("Mutex[{}] .. released", self.tag);
+        trace!("Mutex[{}] .. released", self.tag);
     }
 }
 

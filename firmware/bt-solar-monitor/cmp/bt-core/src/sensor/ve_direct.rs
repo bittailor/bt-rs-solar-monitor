@@ -2,6 +2,37 @@ use embedded_io_async::{Read, Write};
 use heapless::{LinearMap, String};
 
 #[derive(Default, Debug)]
+pub struct Averaging {
+    sum: Reading,
+    count: u32,
+}
+
+impl Averaging {
+    pub fn add_reading(&mut self, reading: &Reading) {
+        self.sum.battery_voltage += reading.battery_voltage;
+        self.sum.battery_current += reading.battery_current;
+        self.sum.panel_voltage += reading.panel_voltage;
+        self.sum.panel_power += reading.panel_power;
+        self.sum.load_current += reading.load_current;
+        self.count += 1;
+    }
+
+    pub fn average(&self) -> Option<Reading> {
+        if self.count == 0 {
+            None
+        } else {
+            Some(Reading {
+                battery_voltage: self.sum.battery_voltage / self.count as f32,
+                battery_current: self.sum.battery_current / self.count as f32,
+                panel_voltage: self.sum.panel_voltage / self.count as f32,
+                panel_power: self.sum.panel_power / self.count as f32,
+                load_current: self.sum.load_current / self.count as f32,
+            })
+        }
+    }
+}
+
+#[derive(Default, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Reading {
     battery_voltage: f32, // V
@@ -111,7 +142,7 @@ impl<Stream: Read> FrameHandler<Stream> {
                 let checksum_byte = self.read_byte().await;
                 self.checksum.add(checksum_byte);
                 if self.checksum.is_valid() {
-                    debug!("VE.Checksum> Valid => {} messages", messages.len());
+                    trace!("VE.Checksum> Valid => {} messages", messages.len());
                     self.checksum.clear();
                     return Ok(messages);
                 } else {
@@ -221,6 +252,7 @@ impl Checksum {
 
 #[cfg(test)]
 pub mod tests {
+    use super::*;
 
     #[tokio::test]
     async fn check_read_once() {
@@ -264,5 +296,33 @@ pub mod tests {
         assert_eq!(values_2.get("PID").unwrap().as_str(), "0x203");
         assert_eq!(values_2.get("V").unwrap().as_str(), "26201");
         assert_eq!(values_2.get("P").unwrap().as_str(), "0");
+    }
+
+    #[tokio::test]
+    async fn averaging() {
+        let mut storage = Averaging::default();
+        assert!(storage.average().is_none());
+
+        storage.add_reading(&Reading {
+            battery_voltage: 12.0,
+            battery_current: 1.0,
+            panel_voltage: 22.0,
+            panel_power: 50.0,
+            load_current: 0.8,
+        });
+        storage.add_reading(&Reading {
+            battery_voltage: 12.0,
+            battery_current: 1.0,
+            panel_voltage: 18.0,
+            panel_power: 52.0,
+            load_current: 0.2,
+        });
+
+        let average = storage.average().unwrap();
+        assert_eq!(average.battery_voltage, 12.0);
+        assert_eq!(average.battery_current, 1.0);
+        assert_eq!(average.panel_voltage, 20.0);
+        assert_eq!(average.panel_power, 51.0);
+        assert_eq!(average.load_current, 0.5);
     }
 }

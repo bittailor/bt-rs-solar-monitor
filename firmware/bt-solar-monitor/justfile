@@ -10,4 +10,4 @@ build:
     cargo build --release
 
 run:
-    cargo run --release --bin lte
+    cargo run --release --bin bockli

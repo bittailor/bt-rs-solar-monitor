@@ -10,7 +10,7 @@ use core::mem::{MaybeUninit, replace};
 
 use embassy_futures::select::select;
 use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex,
+    blocking_mutex::raw::NoopRawMutex,
     channel::{Channel, Receiver, Sender},
     mutex::Mutex,
 };
@@ -142,16 +142,16 @@ enum AtResponseMessage {
 }
 
 pub struct State<Stream: Read + Write> {
-    tx_channel: Channel<CriticalSectionRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-    rx_channel: Channel<CriticalSectionRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
-    at_controller: MaybeUninit<Mutex<CriticalSectionRawMutex, AtControllerImpl<Stream>>>,
+    tx_channel: Channel<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+    rx_channel: Channel<NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+    at_controller: MaybeUninit<Mutex<NoopRawMutex, AtControllerImpl<Stream>>>,
 }
 
 impl<Stream: Read + Write> State<Stream> {
     pub fn new() -> Self {
         Self {
-            tx_channel: Channel::<CriticalSectionRawMutex, AtRequestMessage, CHANNEL_SIZE>::new(),
-            rx_channel: Channel::<CriticalSectionRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>::new(),
+            tx_channel: Channel::<NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>::new(),
+            rx_channel: Channel::<NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>::new(),
             at_controller: MaybeUninit::uninit(),
         }
     }
@@ -163,7 +163,7 @@ pub fn new<'a, Stream: Read + Write>(
 ) -> (crate::at::Runner<'a, AtControllerImpl<Stream>>, AtClientImpl<'a, AtControllerImpl<Stream>>) {
     let at_client = Mutex::new(crate::at::AtControllerImpl::new(stream));
     state.at_controller.write(at_client);
-    let ctr: &Mutex<CriticalSectionRawMutex, AtControllerImpl<Stream>> = unsafe { &*state.at_controller.as_ptr() };
+    let ctr: &Mutex<NoopRawMutex, AtControllerImpl<Stream>> = unsafe { &*state.at_controller.as_ptr() };
     let handle = AtControllerHandle { inner: ctr };
     let runner = crate::at::Runner::new(handle, state.tx_channel.receiver(), state.rx_channel.sender());
     let client = AtClientImpl::new(state.tx_channel.sender(), state.rx_channel.receiver(), handle);
@@ -190,16 +190,16 @@ pub async fn at<'ch, Ctr: AtController>(client: &impl AtClient<'ch, Ctr>) -> Res
 }
 
 pub struct Runner<'ch, Ctr: AtController> {
-    receiver: Receiver<'ch, CriticalSectionRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-    sender: Sender<'ch, CriticalSectionRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+    receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+    sender: Sender<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
     at_controller: AtControllerHandle<'ch, Ctr>,
 }
 
 impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
     fn new(
         at_controller: AtControllerHandle<'ch, Ctr>,
-        receiver: Receiver<'ch, CriticalSectionRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-        sender: Sender<'ch, CriticalSectionRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+        receiver: Receiver<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+        sender: Sender<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
     ) -> Self {
         Self {
             receiver,
@@ -272,15 +272,15 @@ pub trait AtClient<'ch, Ctr: AtController> {
 }
 
 pub struct AtClientImpl<'ch, Ctr: AtController> {
-    tx: Sender<'ch, CriticalSectionRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-    rx: Receiver<'ch, CriticalSectionRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+    tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+    rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
     at_controller: AtControllerHandle<'ch, Ctr>,
 }
 
 impl<'ch, Ctr: AtController> AtClientImpl<'ch, Ctr> {
     fn new(
-        tx: Sender<'ch, CriticalSectionRawMutex, AtRequestMessage, CHANNEL_SIZE>,
-        rx: Receiver<'ch, CriticalSectionRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
+        tx: Sender<'ch, NoopRawMutex, AtRequestMessage, CHANNEL_SIZE>,
+        rx: Receiver<'ch, NoopRawMutex, Result<AtResponseMessage, AtError>, CHANNEL_SIZE>,
         at_controller: AtControllerHandle<'ch, Ctr>,
     ) -> Self {
         Self { tx, rx, at_controller }
@@ -305,7 +305,7 @@ impl<'ch, Ctr: AtController> AtClient<'ch, Ctr> for AtClientImpl<'ch, Ctr> {
 }
 
 pub struct AtControllerHandle<'ch, Ctr: AtController> {
-    inner: &'ch Mutex<CriticalSectionRawMutex, Ctr>,
+    inner: &'ch Mutex<NoopRawMutex, Ctr>,
 }
 impl<'ch, Ctr: AtController> Copy for AtControllerHandle<'ch, Ctr> {}
 impl<'ch, Ctr: AtController> Clone for AtControllerHandle<'ch, Ctr> {
@@ -315,7 +315,7 @@ impl<'ch, Ctr: AtController> Clone for AtControllerHandle<'ch, Ctr> {
 }
 
 impl<'ch, Ctr: AtController> AtControllerHandle<'ch, Ctr> {
-    async fn inner(&self, tag: &'static str) -> LoggingMutexGuard<'_, CriticalSectionRawMutex, Ctr> {
+    async fn inner(&self, tag: &'static str) -> LoggingMutexGuard<'_, NoopRawMutex, Ctr> {
         LoggingMutexGuard::new(self.inner, tag).await
     }
 }
