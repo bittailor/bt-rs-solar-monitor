@@ -1,21 +1,22 @@
+host_target := if os() == "macos" { "aarch64-apple-darwin" } else if os() == "windows" { "x86_64-pc-windows-msvc" } else { "x86_64-unknown-linux-gnu" } 
+
 default: build host_test clippy
 
 clippy:
     cargo clippy --release
-    cargo clippy --features log --target aarch64-apple-darwin --workspace --all-targets --exclude sketch
+    cargo clippy --features log --target {{host_target}} --workspace --all-targets --exclude sketch
 
 clippy_ci:
     cargo clippy --release --features defmt --workspace --lib --bins --exclude sketch -- -D warnings
-    cargo clippy --features log --target aarch64-apple-darwin --workspace --all-targets --exclude sketch -- -D warnings
-    cargo clippy --features defmt --target aarch64-apple-darwin --workspace --all-targets --exclude sketch -- -D warnings
+    cargo clippy --features log --target {{host_target}} --workspace --all-targets --exclude sketch -- -D warnings
+    cargo clippy --features defmt --target {{host_target}} --workspace --all-targets --exclude sketch -- -D warnings
     
 host_test:
-    cargo test --features log --target aarch64-apple-darwin --workspace --exclude sketch
+    cargo test --features log --target {{host_target}} --workspace --exclude sketch
 
 build:
     cargo build --release
-    cargo build --features log --target aarch64-apple-darwin --workspace --all-targets --exclude sketch
-
+    cargo build --features log --target {{host_target}} --workspace --all-targets --exclude sketch
 run:
     cargo run --release --bin bockli
 
