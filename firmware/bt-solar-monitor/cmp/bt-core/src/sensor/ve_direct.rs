@@ -1,3 +1,4 @@
+use embassy_time::Instant;
 use embedded_io_async::{Read, Write};
 use heapless::{LinearMap, String};
 
@@ -17,17 +18,24 @@ impl Averaging {
         self.count += 1;
     }
 
-    pub fn average(&self) -> Option<Reading> {
+    pub fn average(&mut self) -> Option<(Reading, u32)> {
         if self.count == 0 {
             None
         } else {
-            Some(Reading {
-                battery_voltage: self.sum.battery_voltage / self.count as f32,
-                battery_current: self.sum.battery_current / self.count as f32,
-                panel_voltage: self.sum.panel_voltage / self.count as f32,
-                panel_power: self.sum.panel_power / self.count as f32,
-                load_current: self.sum.load_current / self.count as f32,
-            })
+            let count = self.count;
+            let reading = Some((
+                Reading {
+                    battery_voltage: self.sum.battery_voltage / count as f32,
+                    battery_current: self.sum.battery_current / count as f32,
+                    panel_voltage: self.sum.panel_voltage / count as f32,
+                    panel_power: self.sum.panel_power / count as f32,
+                    load_current: self.sum.load_current / count as f32,
+                },
+                count,
+            ));
+            self.sum = Reading::default();
+            self.count = 0;
+            reading
         }
     }
 }
@@ -44,17 +52,40 @@ pub struct Reading {
 
 pub struct Runner<Stream: Read + Write> {
     frame_handler: FrameHandler<Stream>,
+    averaging: Averaging,
+    average_interval: embassy_time::Duration,
 }
 
 impl<Stream: Read + Write> Runner<Stream> {
     pub async fn run(mut self) {
-        self.frame_handler.run().await;
+        loop {
+            self.averaging_once().await;
+        }
+    }
+
+    pub async fn averaging_once(&mut self) {
+        let end = Instant::now() + self.average_interval;
+        loop {
+            let reading = self.frame_handler.read_next().await;
+            self.averaging.add_reading(&reading);
+            if Instant::now() >= end {
+                if let Some(average) = self.averaging.average() {
+                    info!("VE.Average> {:?}", average);
+                } else {
+                    warn!("VE.Average> No readings collected during interval {}s", self.average_interval.as_secs());
+                }
+                self.averaging = Averaging::default();
+                break;
+            }
+        }
     }
 }
 
-pub fn new<Stream: Read + Write>(stream: Stream) -> Runner<Stream> {
+pub fn new<Stream: Read + Write>(stream: Stream, average_interval: embassy_time::Duration) -> Runner<Stream> {
     Runner {
         frame_handler: FrameHandler::new(stream),
+        averaging: Averaging::default(),
+        average_interval,
     }
 }
 
@@ -74,11 +105,7 @@ impl<Stream: Read> FrameHandler<Stream> {
         }
     }
 
-    async fn run(&mut self) {
-        self.run_internal().await;
-    }
-
-    async fn run_internal(&mut self) {
+    pub async fn read_next(&mut self) -> Reading {
         loop {
             let values = self.run_once().await;
             match values {
@@ -118,7 +145,8 @@ impl<Stream: Read> FrameHandler<Stream> {
                         }
                         _ => {}
                     });
-                    info!("VE.Reading> {:?}", reading);
+                    trace!("VE.Reading> {:?}", reading);
+                    return reading;
                 }
                 Err(_) => {
                     warn!("Error reading VE frame");
@@ -252,6 +280,8 @@ impl Checksum {
 
 #[cfg(test)]
 pub mod tests {
+    use approx::assert_relative_eq;
+
     use super::*;
 
     #[tokio::test]
@@ -319,10 +349,32 @@ pub mod tests {
         });
 
         let average = storage.average().unwrap();
-        assert_eq!(average.battery_voltage, 12.0);
-        assert_eq!(average.battery_current, 1.0);
-        assert_eq!(average.panel_voltage, 20.0);
-        assert_eq!(average.panel_power, 51.0);
-        assert_eq!(average.load_current, 0.5);
+        assert_eq!(average.1, 2);
+        assert_relative_eq!(average.0.battery_voltage, 12.0);
+        assert_relative_eq!(average.0.battery_current, 1.0);
+        assert_relative_eq!(average.0.panel_voltage, 20.0);
+        assert_relative_eq!(average.0.panel_power, 51.0);
+        assert_relative_eq!(average.0.load_current, 0.5);
+
+        assert!(storage.average().is_none());
+
+        for i in 0..10 {
+            storage.add_reading(&Reading {
+                battery_voltage: 12.0 + i as f32,
+                battery_current: 1.0 + i as f32,
+                panel_voltage: 18.0 + i as f32,
+                panel_power: 52.0 + i as f32,
+                load_current: 0.2 + i as f32,
+            });
+        }
+        let average = storage.average().unwrap();
+        assert_eq!(average.1, 10);
+        assert_relative_eq!(average.0.battery_voltage, 16.5);
+        assert_relative_eq!(average.0.battery_current, 5.5);
+        assert_relative_eq!(average.0.panel_voltage, 22.5);
+        assert_relative_eq!(average.0.panel_power, 56.5);
+        assert_relative_eq!(average.0.load_current, 4.7);
+
+        assert!(storage.average().is_none());
     }
 }

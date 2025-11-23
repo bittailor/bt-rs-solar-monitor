@@ -1,23 +1,33 @@
 host_target := if os() == "macos" { "aarch64-apple-darwin" } else if os() == "windows" { "x86_64-pc-windows-msvc" } else { "x86_64-unknown-linux-gnu" } 
 
-default: build host_test clippy
+host_excludes := "sketch nrf-solar-monitor"
+host_excludes_cli := prepend('--exclude ', host_excludes)
+
+default: build host_test clippy size
 
 clippy:
     cargo clippy --release
-    cargo clippy --features log --target {{host_target}} --workspace --all-targets --exclude sketch
+    cargo clippy --features log --target {{host_target}} --workspace --all-targets {{host_excludes_cli}}
 
 clippy_ci:
-    cargo clippy --release --features defmt --workspace --lib --bins --exclude sketch -- -D warnings
-    cargo clippy --features log --target {{host_target}} --workspace --all-targets --exclude sketch -- -D warnings
-    cargo clippy --features defmt --target {{host_target}} --workspace --all-targets --exclude sketch -- -D warnings
+    cargo clippy --release --features defmt --workspace --lib --bins -- -D warnings
+    cargo clippy --features log --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
+    cargo clippy --features defmt --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
     
 host_test:
-    cargo test --features log --target {{host_target}} --workspace --exclude sketch
+    cargo test --features log --target {{host_target}} --workspace {{host_excludes_cli}}
 
 build:
     cargo build --release
-    cargo build --features log --target {{host_target}} --workspace --all-targets --exclude sketch
+    cargo build --features log --target {{host_target}} --workspace --all-targets {{host_excludes_cli}}
+
+size:
+    cargo size --release --bin nrf-solar-monitor 
+
 run:
-    cargo run --release --bin bockli
+    cargo run --release --bin nrf-solar-monitor
+
+sketch:
+    cargo run --release --bin ve
 
 ci: build host_test clippy_ci  

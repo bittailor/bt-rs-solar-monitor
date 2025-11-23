@@ -40,7 +40,7 @@ async fn main(_spawner: Spawner) {
         &mut uart_ve_rx_buffer,
         &mut uart_ve_tx_buffer,
     );
-    let ve_direct_runner = bt_core::sensor::ve_direct::new(uart_ve);
+    let ve_direct_runner = bt_core::sensor::ve_direct::new(uart_ve, embassy_time::Duration::from_secs(10));
 
     let blinky = async {
         loop {
