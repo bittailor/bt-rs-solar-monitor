@@ -54,6 +54,7 @@ impl<'a, M: RawMutex, T: ?Sized> Drop for LoggingMutexGuard<'a, M, T> {
 #[cfg(test)]
 pub mod tests {
 
+    #[cfg(feature = "log")]
     #[cfg_attr(feature = "log", ctor::ctor)]
     fn init() {
         tracing_subscriber::fmt()

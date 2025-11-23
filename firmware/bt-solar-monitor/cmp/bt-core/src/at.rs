@@ -535,7 +535,7 @@ pub mod mocks {
 
     use super::*;
     use crate::at::{AT_BUFFER_SIZE, AtCommandResponse, AtError, MAX_RESPONSE_LINES};
-    use core::{any::Any, cell::RefCell};
+    use core::any::Any;
     use std::boxed::Box;
 
     pub struct AtControllerMock {
@@ -563,13 +563,13 @@ pub mod mocks {
     }
 
     pub struct AtClientMock {
-        controller: RefCell<AtControllerMock>,
+        controller: tokio::sync::Mutex<AtControllerMock>,
     }
 
     impl AtClientMock {
         pub fn new(request: Box<dyn Any>, response: Box<dyn Any>) -> Self {
             Self {
-                controller: RefCell::new(AtControllerMock {
+                controller: tokio::sync::Mutex::new(AtControllerMock {
                     request,
                     response: Some(response),
                 }),
@@ -583,7 +583,7 @@ pub mod mocks {
             F: AsyncFnMut(&mut AtControllerMock) -> R + 'a,
             AtControllerMock: 'a,
         {
-            let mut ctr = self.controller.borrow_mut();
+            let mut ctr = self.controller.lock().await;
             f(&mut ctr).await
         }
     }
