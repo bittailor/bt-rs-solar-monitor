@@ -56,7 +56,7 @@ pub mod tests {
     async fn test_now_not_sync_yet() {
         UtcTime::reset().await;
         let now = UtcTime::now().await;
-        assert!(now.is_none());
+        std::assert!(now.is_none());
     }
 
     #[serial(bt_time)]
@@ -66,7 +66,7 @@ pub mod tests {
         UtcTime::time_sync(sync).await;
         let now = UtcTime::now().await;
         assert!(now.is_some());
-        assert_eq!(now.unwrap(), sync);
+        std::assert_eq!(now.unwrap(), sync);
     }
 
     #[serial(bt_time)]
@@ -76,11 +76,11 @@ pub mod tests {
         UtcTime::time_sync(sync).await;
         let now = UtcTime::now().await;
         assert!(now.is_some());
-        assert_eq!(now.unwrap(), sync);
+        std::assert_eq!(now.unwrap(), sync);
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         let now = super::UtcTime::now().await;
         assert!(now.is_some());
-        assert_eq!(now.unwrap(), sync + Duration::seconds(2));
+        std::assert_eq!(now.unwrap(), sync + Duration::seconds(2));
     }
 
     #[serial(bt_time)]
@@ -90,10 +90,10 @@ pub mod tests {
         UtcTime::time_sync(sync_one).await;
         let now_one = UtcTime::now().await;
         assert!(now_one.is_some());
-        assert_eq!(now_one.unwrap(), sync_one);
+        std::assert_eq!(now_one.unwrap(), sync_one);
         let sync_two = NaiveDateTime::parse_from_str("2025-11-30 12:45:34", "%Y-%m-%d %H:%M:%S").unwrap();
         UtcTime::time_sync(sync_two).await;
         let now_two = super::UtcTime::now().await;
-        assert_eq!(now_two.unwrap(), sync_two);
+        std::assert_eq!(now_two.unwrap(), sync_two);
     }
 }
