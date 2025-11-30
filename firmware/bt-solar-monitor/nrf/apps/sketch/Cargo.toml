@@ -49,4 +49,4 @@ embassy-nrf = { version = "0.8.0", features = [
   "time",
 ] }
 
-bt-core = { path = "../../cmp/bt-core", features = ["defmt"] }
+bt-core = { path = "../../../components/bt-core", features = ["defmt"] }

@@ -1,0 +1,43 @@
+host_target := if os() == "macos" { "aarch64-apple-darwin" } else if os() == "windows" { "x86_64-pc-windows-msvc" } else { "x86_64-unknown-linux-gnu" } 
+
+host_excludes := "sketch nrf-solar-monitor"
+host_excludes_cli := prepend('--exclude ', host_excludes)
+
+default: build host_test clippy size
+
+clippy:
+    cargo clippy --release
+    cargo clippy --features log --target {{host_target}} --workspace --all-targets {{host_excludes_cli}}
+
+clippy_ci:
+    cargo clippy --release --features defmt --workspace --lib --bins -- -D warnings
+    cargo clippy --features log --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
+    cargo clippy --features defmt --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
+    
+host_test:
+    cargo test --features log --features std --target {{host_target}} --workspace {{host_excludes_cli}}
+
+build_components:
+    cargo build
+    cargo build --features log
+    cargo build --features defmt  
+
+[working-directory: 'nrf']
+build_nrf:
+    cargo build --release 
+
+
+build:
+    cargo build --release
+    cargo build --features log --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}}
+
+size:
+    cargo size --release --bin nrf-solar-monitor 
+
+run:
+    cargo run --release --bin nrf-solar-monitor
+
+sketch:
+    cargo run --release --bin ve
+
+ci: build host_test clippy_ci  

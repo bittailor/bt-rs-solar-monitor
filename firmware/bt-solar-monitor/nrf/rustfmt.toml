@@ -1,0 +1,2 @@
+max_width = 160
+fn_call_width = 148 # 12 less than max_width for some reason

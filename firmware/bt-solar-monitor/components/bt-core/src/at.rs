@@ -424,11 +424,8 @@ impl<S: Read + Write> AtControllerImpl<S> {
         match with_timeout(timeout, async {
             loop {
                 let line = self.read_line().await?;
-                if line == "OK" {
-                    debug!("OK => success => {} response lines", lines.len());
-                    break Ok(());
-                } else if line == "DOWNLOAD" {
-                    debug!("DOWNLOAD => success => {} response lines", lines.len());
+                if line == "OK" || line == "SUCCESS" {
+                    debug!("{} => success => {} response lines", line, lines.len());
                     break Ok(());
                 } else if line == "ERROR" {
                     warn!("ERROR => error => {} response lines", lines.len());

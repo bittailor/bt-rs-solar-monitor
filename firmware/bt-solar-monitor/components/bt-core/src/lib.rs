@@ -1,4 +1,4 @@
-#![cfg_attr(target_os = "none", no_std)]
+#![cfg_attr(not(test), no_std)]
 
 use embassy_sync::{
     blocking_mutex::raw::RawMutex,

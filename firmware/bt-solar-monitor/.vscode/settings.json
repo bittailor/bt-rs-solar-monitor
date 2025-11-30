@@ -1,12 +1,8 @@
 {
-    "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
-    "rust-analyzer.cargo.features": [
-        "log",
-        "std"
+    "rust-analyzer.linkedProjects": [
+        // order is important (rust-analyzer/rust-analyzer#7764)
+        "Cargo.toml",
+        "nrf/Cargo.toml",
     ],
     "rust-analyzer.cargo.allTargets": false,
-    "rust-analyzer.runnables.extraArgs": [
-        "--target",
-        "aarch64-apple-darwin"
-    ],
 }

@@ -3,31 +3,51 @@ host_target := if os() == "macos" { "aarch64-apple-darwin" } else if os() == "wi
 host_excludes := "sketch nrf-solar-monitor"
 host_excludes_cli := prepend('--exclude ', host_excludes)
 
-default: build host_test clippy size
+default: build test clippy size
 
-clippy:
+ci: build test clippy size
+
+build: build_components build_nrf
+
+clippy: clippy_components clippy_nrf
+
+test: test_components
+
+size: size_nrf
+
+build_components:
+    cargo build
+    cargo build --features log
+    cargo build --features defmt
+    cargo build --release --features defmt --target thumbv7em-none-eabihf
+
+clippy_components:
+    cargo clippy
+    cargo clippy --features log
+    cargo clippy --features defmt
+    cargo clippy --release --features defmt --target thumbv7em-none-eabihf
+
+[working-directory: 'nrf']
+build_nrf:
+    cargo build --release 
+
+[working-directory: 'nrf']
+clippy_nrf:
     cargo clippy --release
-    cargo clippy --features log --target {{host_target}} --workspace --all-targets {{host_excludes_cli}}
-
-clippy_ci:
-    cargo clippy --release --features defmt --workspace --lib --bins -- -D warnings
-    cargo clippy --features log --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
-    cargo clippy --features defmt --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
     
-host_test:
-    cargo test --features log --features std --target {{host_target}} --workspace {{host_excludes_cli}}
+test_components:
+    cargo test
 
-build:
-    cargo build --release
-    cargo build --features log --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}}
-
-size:
+[working-directory: 'nrf']
+size_nrf:
     cargo size --release --bin nrf-solar-monitor 
 
+[working-directory: 'nrf']
 run:
     cargo run --release --bin nrf-solar-monitor
 
+[working-directory: 'nrf']
 sketch:
     cargo run --release --bin ve
 
-ci: build host_test clippy_ci  
+  
