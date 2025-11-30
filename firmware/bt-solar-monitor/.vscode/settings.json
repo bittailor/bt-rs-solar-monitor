@@ -1,7 +1,8 @@
 {
     "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
     "rust-analyzer.cargo.features": [
-        "log"
+        "log",
+        "std"
     ],
     "rust-analyzer.cargo.allTargets": false,
     "rust-analyzer.runnables.extraArgs": [

@@ -11,15 +11,15 @@ clippy:
 
 clippy_ci:
     cargo clippy --release --features defmt --workspace --lib --bins -- -D warnings
-    cargo clippy --features log --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
-    cargo clippy --features defmt --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
+    cargo clippy --features log --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
+    cargo clippy --features defmt --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}} -- -D warnings
     
 host_test:
-    cargo test --features log --target {{host_target}} --workspace {{host_excludes_cli}}
+    cargo test --features log --features std --target {{host_target}} --workspace {{host_excludes_cli}}
 
 build:
     cargo build --release
-    cargo build --features log --target {{host_target}} --workspace --all-targets {{host_excludes_cli}}
+    cargo build --features log --features std --target {{host_target}} --workspace --all-targets {{host_excludes_cli}}
 
 size:
     cargo size --release --bin nrf-solar-monitor 

@@ -1,6 +1,10 @@
 use embassy_futures::yield_now;
+use embassy_time::Timer;
 
-use crate::net::cellular::{CellularError, CellularModule};
+use crate::{
+    net::cellular::{CellularError, CellularModule},
+    time::UtcTime,
+};
 
 pub struct Runner<Module: CellularModule> {
     cloud_client: CloudClient<Module>,
@@ -49,8 +53,12 @@ impl<Module: CellularModule> CloudClient<Module> {
             CloudClientState::Sleeping => self.handle_sleeping().await,
         };
         if let Err(e) = result {
-            warn!("CloudClient error: {:?}", e);
-            // TODO: handle error and state transitions
+            warn!("CloudClient error: {:?} => resetting module", e);
+            while self.module.reset().await.is_err() {
+                warn!("CloudClient reset error, retrying...");
+                Timer::after_secs(30).await;
+            }
+            self.state = CloudClientState::Startup;
         }
     }
 
@@ -58,7 +66,7 @@ impl<Module: CellularModule> CloudClient<Module> {
         self.module.power_cycle().await?;
         self.module.startup_network("gprs.swisscom.ch").await?;
         let now = self.module.query_real_time_clock().await?;
-        crate::time::time_sync(now).await;
+        UtcTime::time_sync(now).await;
         self.state = CloudClientState::Connected;
         info!("CloudClient connected at {}", crate::fmt::FormatableNaiveDateTime(&now));
         Ok(())

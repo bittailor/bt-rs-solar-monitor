@@ -18,6 +18,10 @@ pub struct SimComCellularModule<'ch, Output: OutputPin, Ctr: AtController> {
 }
 
 impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule for SimComCellularModule<'ch, Output, Ctr> {
+    async fn reset(&mut self) -> Result<(), CellularError> {
+        self.reset().await
+    }
+
     async fn power_cycle(&mut self) -> Result<(), CellularError> {
         self.power_cycle().await
     }

@@ -46,6 +46,7 @@ impl embedded_io_async::Error for CellularError {
 }
 
 pub trait CellularModule {
+    async fn reset(&mut self) -> Result<(), CellularError>;
     async fn power_cycle(&mut self) -> Result<(), CellularError>;
     async fn startup_network(&mut self, apn: &str) -> Result<(), CellularError>;
     async fn query_real_time_clock(&self) -> Result<NaiveDateTime, CellularError>;
