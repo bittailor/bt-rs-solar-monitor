@@ -103,6 +103,7 @@ name = "bt-core"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "chrono",
  "ctor",
  "defmt 1.0.1",
  "defmt-rtt",
@@ -142,6 +143,15 @@ name = "cfg-if"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
+
+[[package]]
+name = "chrono"
+version = "0.4.42"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "cortex-m"
@@ -282,9 +292,9 @@ dependencies = [
 
 [[package]]
 name = "defmt-rtt"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2cac3b8a5644a9e02b75085ebad3b6deafdbdbdec04bb25086523828aa4dfd1"
+checksum = "93d5a25c99d89c40f5676bec8cefe0614f17f0f40e916f98e345dae941807f9e"
 dependencies = [
  "critical-section",
  "defmt 1.0.1",
@@ -794,6 +804,7 @@ dependencies = [
  "embedded-hal-async",
  "embedded-io-async",
  "heapless 0.9.1",
+ "log",
  "panic-probe",
  "static_cell",
 ]
@@ -1030,6 +1041,7 @@ dependencies = [
  "embedded-hal-async",
  "embedded-io-async",
  "heapless 0.9.1",
+ "log",
  "panic-probe",
  "static_cell",
 ]

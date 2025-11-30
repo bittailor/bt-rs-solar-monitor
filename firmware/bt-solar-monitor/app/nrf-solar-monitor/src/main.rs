@@ -1,9 +1,7 @@
 #![no_std]
 #![no_main]
 
-use bt_core::at::AtController;
-use bt_core::net::cellular::CellularError;
-use bt_core::net::cellular::sim_com_a67::CellularModule;
+use bt_core::net::cellular::sim_com_a67::SimComCellularModule;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
@@ -14,8 +12,10 @@ use embassy_nrf::{
     peripherals, uarte,
 };
 use embassy_time::Timer;
-use embedded_hal::digital::OutputPin;
 use {defmt_rtt as _, panic_probe as _};
+
+//const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(5 * 60);
+const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(20);
 
 bind_interrupts!(struct Irqs {
     UARTE0 => buffered_uarte::InterruptHandler<peripherals::UARTE0>;
@@ -50,13 +50,13 @@ async fn main(_spawner: Spawner) {
 
     let mut at_state = bt_core::at::State::new();
     let (at_runner, at_client) = bt_core::at::new(&mut at_state, uart_lte);
-    let mut lte = CellularModule::new(at_client, pwrkey, reset);
+    let module = SimComCellularModule::new(at_client, pwrkey, reset);
 
     let mut uart_ve_config = uarte::Config::default();
     uart_ve_config.parity = uarte::Parity::EXCLUDED;
     uart_ve_config.baudrate = uarte::Baudrate::BAUD19200;
-    let mut uart_ve_tx_buffer = [0u8; 256];
-    let mut uart_ve_rx_buffer = [0u8; 256];
+    let mut uart_ve_tx_buffer = [0u8; 1024];
+    let mut uart_ve_rx_buffer = [0u8; 1024];
     let uart_ve = BufferedUarte::new(
         p.UARTE1,
         p.TIMER1,
@@ -70,14 +70,19 @@ async fn main(_spawner: Spawner) {
         &mut uart_ve_rx_buffer,
         &mut uart_ve_tx_buffer,
     );
-    let ve_direct_runner = bt_core::sensor::ve_direct::new(uart_ve, embassy_time::Duration::from_secs(60));
+    let mut ve_state = bt_core::sensor::ve_direct::State::<8>::new();
+    let (ve_direct_runner, _ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, CONFIG_SOLAR_SENSOR_AVERAGING_DURATION);
 
+    let cloud_runner = bt_core::net::cloud::new(module);
+
+    /*
     let sequence = async {
         match lte_sequence(&mut lte).await {
             Ok(_) => info!("LTE commands done"),
             Err(e) => error!("LTE commands error: {:?}", e),
         }
     };
+    */
 
     let blinky = async {
         loop {
@@ -89,10 +94,17 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    join4(at_runner.run(), ve_direct_runner.run(), blinky, sequence).await;
-}
+    let ve_sender = async {
+        loop {
+            let reading = _ve_rx.receive().await;
+            info!("VE.Reading> {:?}", reading);
+        }
+    };
 
-async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin, impl AtController>) -> Result<(), CellularError> {
+    join5(at_runner.run(), ve_direct_runner.run(), blinky, cloud_runner.run(), ve_sender).await;
+}
+/*
+async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::SimComCellularModule<'_, impl OutputPin, impl AtController>) -> Result<(), CellularError> {
     info!("start LTE sequence");
 
     lte.power_cycle().await?;
@@ -159,3 +171,4 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
         }
     }
 }
+*/

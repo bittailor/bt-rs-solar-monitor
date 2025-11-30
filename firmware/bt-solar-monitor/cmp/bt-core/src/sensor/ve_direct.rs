@@ -1,3 +1,7 @@
+use embassy_sync::{
+    blocking_mutex::raw::NoopRawMutex,
+    channel::{Channel, Receiver, Sender},
+};
 use embassy_time::Instant;
 use embedded_io_async::{Read, Write};
 use heapless::{LinearMap, String};
@@ -50,13 +54,14 @@ pub struct Reading {
     load_current: f32,    // IL
 }
 
-pub struct Runner<Stream: Read + Write> {
+pub struct Runner<'a, Stream: Read + Write, const N: usize> {
     frame_handler: FrameHandler<Stream>,
     averaging: Averaging,
     average_interval: embassy_time::Duration,
+    rx: Sender<'a, NoopRawMutex, Reading, N>,
 }
 
-impl<Stream: Read + Write> Runner<Stream> {
+impl<Stream: Read + Write, const N: usize> Runner<'_, Stream, N> {
     pub async fn run(mut self) {
         loop {
             self.averaging_once().await;
@@ -69,8 +74,9 @@ impl<Stream: Read + Write> Runner<Stream> {
             let reading = self.frame_handler.read_next().await;
             self.averaging.add_reading(&reading);
             if Instant::now() >= end {
-                if let Some(average) = self.averaging.average() {
-                    info!("VE.Average> {:?}", average);
+                if let Some((average, count)) = self.averaging.average() {
+                    debug!("VE.Average> Over {} => {:?}", count, average);
+                    self.rx.send(average).await;
                 } else {
                     warn!("VE.Average> No readings collected during interval {}s", self.average_interval.as_secs());
                 }
@@ -81,12 +87,36 @@ impl<Stream: Read + Write> Runner<Stream> {
     }
 }
 
-pub fn new<Stream: Read + Write>(stream: Stream, average_interval: embassy_time::Duration) -> Runner<Stream> {
-    Runner {
-        frame_handler: FrameHandler::new(stream),
-        averaging: Averaging::default(),
-        average_interval,
+pub struct State<const N: usize> {
+    channel: Channel<NoopRawMutex, Reading, N>,
+}
+
+impl<const N: usize> State<N> {
+    pub fn new() -> Self {
+        State { channel: Channel::new() }
     }
+}
+
+impl<const N: usize> Default for State<N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn new<'a, Stream: Read + Write, const N: usize>(
+    state: &'a mut State<N>,
+    stream: Stream,
+    average_interval: embassy_time::Duration,
+) -> (Runner<'a, Stream, N>, Receiver<'a, NoopRawMutex, Reading, N>) {
+    (
+        Runner {
+            frame_handler: FrameHandler::new(stream),
+            averaging: Averaging::default(),
+            average_interval,
+            rx: state.channel.sender(),
+        },
+        state.channel.receiver(),
+    )
 }
 
 const STRING_BUFFER_SIZE: usize = 32;

@@ -1,25 +1,47 @@
 use core::str::{self};
 
+use chrono::NaiveDateTime;
 use embassy_time::{Duration, Timer, WithTimeout};
 use embedded_hal::digital::OutputPin;
 use embedded_io_async::Read;
-use heapless::String;
 
 use crate::{
-    at::{AtClient, AtController, http::HttpStatusCode, serial_interface::SleepMode, status_control::Rssi},
-    net::cellular::CellularError,
+    at::{AtClient, AtController, http::HttpStatusCode, network::NetworkRegistrationState, serial_interface::SleepMode, status_control::Rssi},
+    net::cellular::{CellularError, CellularModule},
 };
 
-pub struct CellularModule<'ch, Output: OutputPin, Ctr: AtController> {
+pub struct SimComCellularModule<'ch, Output: OutputPin, Ctr: AtController> {
     at_client: crate::at::AtClientImpl<'ch, Ctr>,
     pwrkey: Output,
     reset: Output,
     http_initialized: bool,
 }
 
-impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule<'ch, Output, Ctr> {
+impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule for SimComCellularModule<'ch, Output, Ctr> {
+    async fn power_cycle(&mut self) -> Result<(), CellularError> {
+        self.power_cycle().await
+    }
+
+    async fn startup_network(&mut self, apn: &str) -> Result<(), CellularError> {
+        self.set_apn(apn).await?;
+
+        while self.read_network_registration().await?.1 != NetworkRegistrationState::Registered {
+            warn!("Not registered to network yet, waiting...");
+            Timer::after_secs(1).await;
+            info!("... retrying ...");
+        }
+        let _rtc = self.query_real_time_clock().await?;
+        Ok(())
+    }
+
+    async fn query_real_time_clock(&self) -> Result<NaiveDateTime, CellularError> {
+        self.query_real_time_clock().await
+    }
+}
+
+impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output, Ctr> {
     pub fn new(at_client: crate::at::AtClientImpl<'ch, Ctr>, pwrkey: Output, reset: Output) -> Self {
-        CellularModule {
+        SimComCellularModule {
             at_client,
             pwrkey,
             reset,
@@ -90,7 +112,7 @@ impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule<'ch, Output, Ctr>
         crate::at::network::get_network_registration(&self.at_client).await.map_err(Into::into)
     }
 
-    pub async fn query_real_time_clock(&self) -> Result<String<64>, CellularError> {
+    pub async fn query_real_time_clock(&self) -> Result<NaiveDateTime, CellularError> {
         crate::at::status_control::query_real_time_clock(&self.at_client).await.map_err(Into::into)
     }
 

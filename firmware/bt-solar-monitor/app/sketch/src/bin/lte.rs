@@ -3,7 +3,7 @@
 
 use bt_core::at::AtController;
 use bt_core::net::cellular::CellularError;
-use bt_core::net::cellular::sim_com_a67::CellularModule;
+use bt_core::net::cellular::sim_com_a67::SimComCellularModule;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
@@ -49,7 +49,7 @@ async fn main(_spawner: Spawner) {
 
     let mut at_state = bt_core::at::State::new();
     let (at_runner, at_client) = bt_core::at::new(&mut at_state, uart_lte);
-    let mut lte = CellularModule::new(at_client, pwrkey, reset);
+    let mut lte = SimComCellularModule::new(at_client, pwrkey, reset);
 
     let sequence = async {
         match lte_sequence(&mut lte).await {
@@ -71,7 +71,7 @@ async fn main(_spawner: Spawner) {
     join3(at_runner.run(), blinky, sequence).await;
 }
 
-async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularModule<'_, impl OutputPin, impl AtController>) -> Result<(), CellularError> {
+async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::SimComCellularModule<'_, impl OutputPin, impl AtController>) -> Result<(), CellularError> {
     info!("start LTE sequence");
 
     lte.power_cycle().await?;
@@ -86,7 +86,7 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
     info!("network registered!");
 
     let rtc = lte.query_real_time_clock().await?;
-    info!("real time clock: {}", rtc);
+    info!("real time clock: {:?}", defmt::Display2Format(&rtc));
 
     let mut buf = [0u8; 1024];
 
@@ -119,7 +119,7 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::CellularMod
         info!(" -> rssi: {}", rssi);
 
         let rtc = lte.query_real_time_clock().await?;
-        info!("real time clock: {}", rtc);
+        info!("real time clock: {}", defmt::Display2Format(&rtc));
 
         Timer::after_secs(10).await;
 

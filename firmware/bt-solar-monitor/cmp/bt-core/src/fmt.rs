@@ -1,6 +1,7 @@
 #![macro_use]
 #![allow(unused)]
 
+use chrono::NaiveDateTime;
 use core::fmt::{Debug, Display, LowerHex};
 
 #[cfg(all(feature = "defmt", feature = "log"))]
@@ -275,4 +276,47 @@ type FormatRequirement = defmt::Format;
 
 #[cfg(not(feature = "defmt"))]
 pub trait FormatRequirement {}
+*/
+
+pub struct FormatableNaiveDateTime<'a>(pub &'a NaiveDateTime);
+
+//#[cfg(feature = "log")]
+impl Display for FormatableNaiveDateTime<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        use chrono::Datelike;
+        use chrono::Timelike;
+
+        write!(f, "{:04}-{:02}-{:02} {:02}:{:02}:{:02}", self.0.year(), self.0.month(), self.0.day(), self.0.hour(), self.0.minute(), self.0.second())
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl<'a> defmt::Format for FormatableNaiveDateTime<'a> {
+    fn format(&self, fmt: defmt::Formatter) {
+        use chrono::Datelike;
+        use chrono::Timelike;
+
+        defmt::write!(fmt, "{:04}-{:02}-{:02} {:02}:{:02}:{:02}", self.0.year(), self.0.month(), self.0.day(), self.0.hour(), self.0.minute(), self.0.second());
+    }
+}
+
+/*
+#[cfg(feature = "defmt")]
+impl<T: fmt::Display + ?Sized> fmt::Display for Display2Format<'_, T> {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+        self.0.fmt(fmt)
+    }
+}
+
+impl<T: fmt::Display + ?Sized> Format for Display2Format<'_, T> {
+    default_format!();
+
+    fn _format_tag() -> Str {
+        defmt_macros::internp!("{=__internal_Display}")
+    }
+
+    fn _format_data(&self) {
+        export::display(&self.0);
+    }
+}
 */

@@ -1,3 +1,7 @@
+#![allow(async_fn_in_trait)]
+
+use chrono::NaiveDateTime;
+
 use crate::at::AtError;
 pub mod sim_com_a67;
 
@@ -39,4 +43,10 @@ impl embedded_io_async::Error for CellularError {
             CellularError::GpioError => embedded_io_async::ErrorKind::Other,
         }
     }
+}
+
+pub trait CellularModule {
+    async fn power_cycle(&mut self) -> Result<(), CellularError>;
+    async fn startup_network(&mut self, apn: &str) -> Result<(), CellularError>;
+    async fn query_real_time_clock(&self) -> Result<NaiveDateTime, CellularError>;
 }

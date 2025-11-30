@@ -10,6 +10,7 @@ pub(crate) mod fmt;
 pub mod at;
 pub mod net;
 pub mod sensor;
+pub mod time;
 
 struct LoggingMutexGuard<'a, M, T>
 where

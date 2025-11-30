@@ -40,7 +40,8 @@ async fn main(_spawner: Spawner) {
         &mut uart_ve_rx_buffer,
         &mut uart_ve_tx_buffer,
     );
-    let ve_direct_runner = bt_core::sensor::ve_direct::new(uart_ve, embassy_time::Duration::from_secs(10));
+    let mut ve_state = bt_core::sensor::ve_direct::State::<8>::default();
+    let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, embassy_time::Duration::from_secs(10));
 
     let blinky = async {
         loop {
@@ -52,5 +53,12 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    join(ve_direct_runner.run(), blinky).await;
+    let ve_logger = async {
+        loop {
+            let reading = ve_rx.receive().await;
+            info!("VE.Reading> {:?}", reading);
+        }
+    };
+
+    join3(ve_direct_runner.run(), blinky, ve_logger).await;
 }
