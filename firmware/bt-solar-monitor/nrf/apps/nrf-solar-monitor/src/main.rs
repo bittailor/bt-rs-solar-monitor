@@ -71,18 +71,10 @@ async fn main(_spawner: Spawner) {
         &mut uart_ve_tx_buffer,
     );
     let mut ve_state = bt_core::sensor::ve_direct::State::<8>::new();
-    let (ve_direct_runner, _ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, CONFIG_SOLAR_SENSOR_AVERAGING_DURATION);
+    let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, CONFIG_SOLAR_SENSOR_AVERAGING_DURATION);
+    let solar_runner = bt_core::solar_monitor::new(ve_rx);
 
     let cloud_runner = bt_core::net::cloud::new(module);
-
-    /*
-    let sequence = async {
-        match lte_sequence(&mut lte).await {
-            Ok(_) => info!("LTE commands done"),
-            Err(e) => error!("LTE commands error: {:?}", e),
-        }
-    };
-    */
 
     let blinky = async {
         loop {
@@ -94,12 +86,5 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    let ve_sender = async {
-        loop {
-            let reading = _ve_rx.receive().await;
-            info!("VE.Reading> {:?}", reading);
-        }
-    };
-
-    join5(at_runner.run(), ve_direct_runner.run(), blinky, cloud_runner.run(), ve_sender).await;
+    join5(at_runner.run(), ve_direct_runner.run(), blinky, cloud_runner.run(), solar_runner.run()).await;
 }
