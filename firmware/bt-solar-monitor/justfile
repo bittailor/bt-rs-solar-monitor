@@ -5,7 +5,7 @@ host_excludes_cli := prepend('--exclude ', host_excludes)
 
 default: build test clippy size
 
-ci: build test clippy size
+ci: build test clippy
 
 build: build_components build_nrf
 
