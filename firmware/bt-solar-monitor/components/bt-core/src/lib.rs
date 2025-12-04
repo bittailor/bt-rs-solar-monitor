@@ -13,6 +13,12 @@ pub mod sensor;
 pub mod solar_monitor;
 pub mod time;
 
+mod proto {
+    #![allow(clippy::all)]
+    #![allow(nonstandard_style, unused, irrefutable_let_patterns)]
+    include!(concat!(env!("OUT_DIR"), "/generated_proto.rs"));
+}
+
 struct LoggingMutexGuard<'a, M, T>
 where
     M: RawMutex,

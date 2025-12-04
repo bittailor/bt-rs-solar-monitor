@@ -324,7 +324,6 @@ pub trait AtController {
     async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError>;
     async fn handle_http_read(&mut self, buf: &mut [u8], offset: usize) -> Result<(), AtError>;
     async fn handle_http_write(&mut self, buf: &[u8]) -> Result<(), AtError>;
-
     async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE>;
 }
 

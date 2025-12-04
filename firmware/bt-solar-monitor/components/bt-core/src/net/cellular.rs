@@ -2,7 +2,10 @@
 
 use chrono::NaiveDateTime;
 
-use crate::at::AtError;
+use crate::{
+    at::{AtController, AtError},
+    net::cellular::sim_com_a67::HttpRequest,
+};
 pub mod sim_com_a67;
 
 #[derive(Debug, Eq, PartialEq)]

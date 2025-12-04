@@ -6,13 +6,25 @@ use crate::{
     time::UtcTime,
 };
 
+pub struct CloudClient {}
+
+impl CloudClient {
+    pub fn new() -> Self {
+        CloudClient {}
+    }
+
+    pub async fn execut_connected<T>(&mut self, action: impl FnOnce() -> T) -> Result<T, CellularError> {
+        Ok(action())
+    }
+}
+
 pub struct Runner<Module: CellularModule> {
-    cloud_client: CloudClient<Module>,
+    cloud_controller: CloudController<Module>,
 }
 
 pub fn new<Module: CellularModule>(module: Module) -> Runner<Module> {
     Runner {
-        cloud_client: CloudClient {
+        cloud_controller: CloudController {
             module,
             state: CloudClientState::Startup,
         },
@@ -22,7 +34,7 @@ pub fn new<Module: CellularModule>(module: Module) -> Runner<Module> {
 impl<Module: CellularModule> Runner<Module> {
     pub async fn run(mut self) {
         loop {
-            self.cloud_client.once().await;
+            self.cloud_controller.once().await;
         }
     }
 }
@@ -35,11 +47,11 @@ enum CloudClientState {
     Sleeping,
 }
 
-pub struct CloudClient<Module: CellularModule> {
+pub struct CloudController<Module: CellularModule> {
     module: Module,
     state: CloudClientState,
 }
-impl<Module: CellularModule> CloudClient<Module> {
+impl<Module: CellularModule> CloudController<Module> {
     pub async fn sleep(&mut self) -> Result<(), CellularError> {
         //self.module.set_sleep_mode(SleepMode::Enabled).await?;
         self.state = CloudClientState::Sleeping;
@@ -97,3 +109,26 @@ impl<'ch, Output: OutputPin, Ctr: AtController> CloudClient<'ch, Output, Ctr> {
     async fn
 }
 */
+
+#[cfg(test)]
+pub mod tests {
+
+    use crate::net::cloud;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn check_execute_connected() {
+        let mut cloud_client = CloudClient::new();
+        let result = cloud_client
+            .execut_connected(async || {
+                info!("Connected action executed");
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                23
+            })
+            .await
+            .unwrap()
+            .await;
+        assert!(result == 23);
+    }
+}

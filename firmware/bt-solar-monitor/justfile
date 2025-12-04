@@ -36,7 +36,7 @@ clippy_nrf:
     cargo clippy --release
     
 test_components:
-    cargo test
+    cargo test --features log
 
 [working-directory: 'nrf']
 size_nrf:

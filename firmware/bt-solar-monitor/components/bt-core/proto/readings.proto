@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package bt.solar;
+
+message Reading {
+    int32 battery_voltage = 1;  // V    mV
+    int32 battery_current = 2;  // I    mA
+    int32 panel_voltage   = 3;  // VPV  mV 
+    int32 panel_power     = 4;  // PPV  W
+    int32 load_current    = 5;  // IL   mA
+} 
+
+message UploadEntry {
+    int32 offset_in_seconds = 1; // Offset from start_timestamp
+    Reading reading = 2;    
+}
+
+message Upload {
+    int64 start_timestamp = 6; // Unix timestamp in milliseconds
+    repeated UploadEntry entries = 1;
+}
