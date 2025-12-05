@@ -5,3 +5,9 @@ task :publish do
         sh "rsync -avzh --delete ./#{folder}/ bockli@bockmattli.ch:/home/bockli/staging/solar-api/#{folder}"
     end
 end
+
+task :generate do 
+    # sh "php ./vendor/bin/protobuf --include-descriptors -i . -o ./src/ ../../firmware/bt-solar-monitor/components/bt-core/proto/readings.proto"
+    
+    sh "protoc --proto_path=../../firmware/bt-solar-monitor/components/bt-core/proto --php_out=./generated/ ../../firmware/bt-solar-monitor/components/bt-core/proto/readings.proto" 
+end

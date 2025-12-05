@@ -1,5 +1,7 @@
 <?php
 
+use Bt\Solar\Upload;
+
 require_once __DIR__.'/../vendor/autoload.php';
 
 Flight::path(__DIR__.'/../');
@@ -42,6 +44,17 @@ Flight::group('/api/v1', function () {
         $hex = bin2hex($msg);
         Flight::response()->setHeader('Content-Type', 'x');
         Flight::response()->write("lte data <- $msg [$hex]");
+    });
+});
+
+Flight::group('/api/v2', function () {
+    Flight::route('POST /solar', function () {
+        $msg = Flight::request()->getBody();
+        $upload = new Upload();
+        $upload->mergeFromString($msg);
+        $n = $upload->getEntries()->count();
+        Flight::response()->setHeader('Content-Type', 'x');
+        Flight::response()->write("$n entries received");
     });
 });
 

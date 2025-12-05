@@ -72,9 +72,10 @@ async fn main(_spawner: Spawner) {
     );
     let mut ve_state = bt_core::sensor::ve_direct::State::<8>::new();
     let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, CONFIG_SOLAR_SENSOR_AVERAGING_DURATION);
-    let solar_runner = bt_core::solar_monitor::new(ve_rx);
+    let upload_channel = embassy_sync::channel::Channel::<embassy_sync::blocking_mutex::raw::NoopRawMutex, _, 4>::new();
+    let solar_runner = bt_core::solar_monitor::new(ve_rx, upload_channel.sender());
 
-    let cloud_runner = bt_core::net::cloud::new(module);
+    let cloud_runner = bt_core::net::cloud::new(module, upload_channel.receiver());
 
     let blinky = async {
         loop {

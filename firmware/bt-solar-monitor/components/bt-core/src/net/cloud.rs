@@ -1,37 +1,32 @@
-use embassy_futures::yield_now;
-use embassy_time::Timer;
+use embassy_sync::{blocking_mutex::raw::RawMutex, channel::Receiver};
+use embassy_time::{Duration, Timer, with_timeout};
+use embedded_hal::digital::OutputPin;
+use heapless::Vec;
 
 use crate::{
-    net::cellular::{CellularError, CellularModule},
+    at::AtController,
+    net::cellular::{CellularError, sim_com_a67::SimComCellularModule},
     time::UtcTime,
 };
 
-pub struct CloudClient {}
-
-impl CloudClient {
-    pub fn new() -> Self {
-        CloudClient {}
-    }
-
-    pub async fn execut_connected<T>(&mut self, action: impl FnOnce() -> T) -> Result<T, CellularError> {
-        Ok(action())
-    }
+pub struct Runner<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize, const N: usize> {
+    cloud_controller: CloudController<'ch, 'a, Output, Ctr, M, B, N>,
 }
 
-pub struct Runner<Module: CellularModule> {
-    cloud_controller: CloudController<Module>,
-}
-
-pub fn new<Module: CellularModule>(module: Module) -> Runner<Module> {
+pub fn new<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize, const N: usize>(
+    module: SimComCellularModule<'ch, Output, Ctr>,
+    upload_receiver: Receiver<'a, M, Vec<u8, B>, N>,
+) -> Runner<'ch, 'a, Output, Ctr, M, B, N> {
     Runner {
         cloud_controller: CloudController {
             module,
             state: CloudClientState::Startup,
+            upload_receiver,
         },
     }
 }
 
-impl<Module: CellularModule> Runner<Module> {
+impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize, const N: usize> Runner<'ch, 'a, Output, Ctr, M, B, N> {
     pub async fn run(mut self) {
         loop {
             self.cloud_controller.once().await;
@@ -47,11 +42,12 @@ enum CloudClientState {
     Sleeping,
 }
 
-pub struct CloudController<Module: CellularModule> {
-    module: Module,
+pub struct CloudController<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize, const N: usize> {
+    module: SimComCellularModule<'ch, Output, Ctr>,
     state: CloudClientState,
+    upload_receiver: Receiver<'a, M, Vec<u8, B>, N>,
 }
-impl<Module: CellularModule> CloudController<Module> {
+impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize, const N: usize> CloudController<'ch, 'a, Output, Ctr, M, B, N> {
     pub async fn sleep(&mut self) -> Result<(), CellularError> {
         //self.module.set_sleep_mode(SleepMode::Enabled).await?;
         self.state = CloudClientState::Sleeping;
@@ -85,50 +81,34 @@ impl<Module: CellularModule> CloudController<Module> {
     }
 
     async fn handle_connected(&mut self) -> Result<(), CellularError> {
-        // TODO implement
-        yield_now().await;
+        match with_timeout(Duration::from_secs(10), self.upload_receiver.receive()).await {
+            Ok(data) => {
+                info!("Uploading {} bytes to cloud...", data.len());
+                let mut response_buffer = [0u8; 1024];
+                let request = self
+                    .module
+                    .request()
+                    .await?
+                    .post("http://api.solar.bockmattli.ch/api/v2/solar", data.as_slice())
+                    .await?
+                    .body()
+                    .read_as_str(&mut response_buffer)
+                    .await?;
+                info!("Upload response: '{}'", request);
+            }
+            Err(_) => {
+                info!("No data to upload, going to sleep...");
+                self.module.set_sleep_mode(crate::at::serial_interface::SleepMode::RxSleep).await?;
+                self.state = CloudClientState::Sleeping;
+            }
+        }
         Ok(())
     }
 
     async fn handle_sleeping(&mut self) -> Result<(), CellularError> {
-        // TODO implement
-        yield_now().await;
+        self.upload_receiver.ready_to_receive().await;
+        self.module.wake_up().await?;
+        self.state = CloudClientState::Connected;
         Ok(())
-    }
-}
-
-/*
-impl<'ch, Output: OutputPin, Ctr: AtController> CloudClient<'ch, Output, Ctr> {
-    pub async fn new(mut module: sim_com_a67::CellularModule<'ch, Output, Ctr>) -> Result<Self, CellularError> {
-        module.power_cycle().await?;
-
-        let new = Self { module };
-        Ok(new)
-    }
-
-    async fn
-}
-*/
-
-#[cfg(test)]
-pub mod tests {
-
-    use crate::net::cloud;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn check_execute_connected() {
-        let mut cloud_client = CloudClient::new();
-        let result = cloud_client
-            .execut_connected(async || {
-                info!("Connected action executed");
-                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-                23
-            })
-            .await
-            .unwrap()
-            .await;
-        assert!(result == 23);
     }
 }

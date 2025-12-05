@@ -49,11 +49,13 @@ embassy-time = { version = "0.5.0", features = ["std"] }
 [dev-dependencies]
 defmt-rtt = "1.0.0"
 tokio = { version = "1.47.1", features = ["full"] }
+reqwest = "0.12.24"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.20"
 ctor = "0.6.1"
 approx = "0.5.1"
 serial_test = "3.2.0"
+
 
 [build-dependencies]
 micropb-gen = { version = "0.4.1" }
