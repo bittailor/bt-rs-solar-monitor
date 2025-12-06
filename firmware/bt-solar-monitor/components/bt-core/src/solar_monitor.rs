@@ -122,7 +122,9 @@ pub mod tests {
     use chrono::{Duration, NaiveDateTime};
     use embassy_sync::blocking_mutex::raw::NoopRawMutex;
     use micropb::MessageDecode;
+    use nom::combinator::Success;
     use serial_test::serial;
+    use std::fs;
 
     use super::*;
 
@@ -165,13 +167,25 @@ pub mod tests {
         let upload_channel = embassy_sync::channel::Channel::<NoopRawMutex, _, 4>::new();
         let mut runner = super::new(sensor_channel.receiver(), upload_channel.sender());
         let uploads = create_uploads(&mut runner, startup).await;
-
         assert_eq!(uploads.len(), 2);
         let body_data = std::vec::Vec::from(uploads[0].as_slice());
         let client = reqwest::Client::new();
-        let res = client.post("http://localhost:8000/api/v2/solar").body(body_data).send().await.unwrap();
-        assert!(res.status().is_success());
-        println!("Response: {:?}", res.text().await.unwrap());
+        //let res = client.post("http://localhost:8000/api/v2/solar/reading").body(body_data).send().await.unwrap();
+        let res = client
+            .post("https://46e3daa6ce83.ngrok-free.app/api/v2/solar/reading")
+            .body(body_data)
+            .send()
+            .await
+            .unwrap();
+        let success = res.status().is_success();
+        let text = res.text().await.unwrap();
+        if !success {
+            fs::write("error.html", text);
+            println!("Error response: {}/error.html", std::env::current_dir().unwrap().display());
+        } else {
+            println!("Response: {:?}", text);
+        }
+        assert!(success);
     }
 
     async fn create_uploads<'a, 'b, M: RawMutex, const NRECEIVER: usize, const NSENDER: usize>(
@@ -185,7 +199,7 @@ pub mod tests {
                 battery_voltage: (10.0 + f),
                 battery_current: (2.0 + f),
                 panel_voltage: (18.0 + f),
-                panel_power: (5.0 + f),
+                panel_power: (50.0 + f * 10.0),
                 load_current: (1.0 + f),
             };
             UtcTime::time_sync(startup + Duration::minutes(5) * i).await;

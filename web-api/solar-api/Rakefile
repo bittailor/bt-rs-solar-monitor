@@ -7,7 +7,6 @@ task :publish do
 end
 
 task :generate do 
-    # sh "php ./vendor/bin/protobuf --include-descriptors -i . -o ./src/ ../../firmware/bt-solar-monitor/components/bt-core/proto/readings.proto"
-    
+    sh "rm -rf ./generated && mkdir -p ./generated/"
     sh "protoc --proto_path=../../firmware/bt-solar-monitor/components/bt-core/proto --php_out=./generated/ ../../firmware/bt-solar-monitor/components/bt-core/proto/readings.proto" 
 end
