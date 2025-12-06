@@ -118,7 +118,7 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
 
     pub async fn wake_up(&self) -> Result<(), CellularError> {
         self.is_alive().await;
-        while self.is_alive().await {
+        while !self.is_alive().await {
             warn!("LTE module not alive, retrying...");
             yield_now().await;
         }

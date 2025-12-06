@@ -84,17 +84,20 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
         match with_timeout(Duration::from_secs(10), self.upload_receiver.receive()).await {
             Ok(data) => {
                 info!("Uploading {} bytes to cloud...", data.len());
-                let mut response_buffer = [0u8; 1024];
-                let request = self
-                    .module
-                    .request()
-                    .await?
-                    .post("http://api.solar.bockmattli.ch/api/v2/solar", data.as_slice())
-                    .await?
-                    .body()
-                    .read_as_str(&mut response_buffer)
-                    .await?;
-                info!("Upload response: '{}'", request);
+                let request = self.module.request().await?;
+                let mut response = request.post("http://api.solar.bockmattli.ch/api/v2/solar/reading", data.as_slice()).await?;
+                if response.status().is_ok() {
+                    info!("Upload successful");
+                } else {
+                    warn!("Upload failed with status {}", response.status());
+                }
+                let body = response.body();
+                if body.is_empty() {
+                    info!("No response body");
+                } else {
+                    let mut body_buffer = [0u8; 1024];
+                    info!("Response body [{}]: {}", body.len(), body.read_as_str(&mut body_buffer).await?);
+                }
             }
             Err(_) => {
                 info!("No data to upload, going to sleep...");

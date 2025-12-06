@@ -65,8 +65,10 @@ impl<'a, 'b, M: RawMutex, const NRECEIVER: usize, const NSENDER: usize> Runner<'
                 let mut entry = UploadEntry::default().init_offset_in_seconds(0).init_reading(reading.into());
                 match self.upload {
                     Some(ref mut upload) => {
-                        entry.set_offset_in_seconds((timestamp.and_utc().timestamp() - upload.start_timestamp) as i32);
+                        let offest = (timestamp.and_utc().timestamp() - upload.start_timestamp) as i32;
+                        entry.set_offset_in_seconds(offest);
                         let _ = upload.entries.push(entry);
+                        debug!("Added reading [+{}s] to upload, total entries: {}", offest, upload.entries.len());
                     }
                     None => {
                         let mut new_upload = Upload {
@@ -74,6 +76,7 @@ impl<'a, 'b, M: RawMutex, const NRECEIVER: usize, const NSENDER: usize> Runner<'
                             entries: micropb::heapless::Vec::new(),
                         };
                         let _ = new_upload.entries.push(entry);
+                        debug!("New Upload started @{}", new_upload.start_timestamp);
                         self.upload = Some(new_upload);
                     }
                 }
@@ -122,7 +125,6 @@ pub mod tests {
     use chrono::{Duration, NaiveDateTime};
     use embassy_sync::blocking_mutex::raw::NoopRawMutex;
     use micropb::MessageDecode;
-    use nom::combinator::Success;
     use serial_test::serial;
     use std::fs;
 
@@ -135,7 +137,6 @@ pub mod tests {
         UtcTime::time_sync(startup).await;
         let sensor_channel = embassy_sync::channel::Channel::<NoopRawMutex, _, 10>::new();
         let upload_channel = embassy_sync::channel::Channel::<NoopRawMutex, _, 4>::new();
-        let mut runner = super::new(sensor_channel.receiver(), upload_channel.sender());
         let mut runner = super::new(sensor_channel.receiver(), upload_channel.sender());
         let uploads = create_uploads(&mut runner, startup).await;
         assert_eq!(uploads.len(), 2);
@@ -171,8 +172,16 @@ pub mod tests {
         let body_data = std::vec::Vec::from(uploads[0].as_slice());
         let client = reqwest::Client::new();
         //let res = client.post("http://localhost:8000/api/v2/solar/reading").body(body_data).send().await.unwrap();
+        /*
         let res = client
             .post("https://46e3daa6ce83.ngrok-free.app/api/v2/solar/reading")
+            .body(body_data)
+            .send()
+            .await
+            .unwrap();
+        */
+        let res = client
+            .post("http://api.solar.bockmattli.ch/api/v2/solar/reading")
             .body(body_data)
             .send()
             .await
@@ -180,7 +189,7 @@ pub mod tests {
         let success = res.status().is_success();
         let text = res.text().await.unwrap();
         if !success {
-            fs::write("error.html", text);
+            fs::write("error.html", text).unwrap();
             println!("Error response: {}/error.html", std::env::current_dir().unwrap().display());
         } else {
             println!("Response: {:?}", text);

@@ -2,7 +2,6 @@
 #![no_main]
 
 use bt_core::net::cellular::sim_com_a67::SimComCellularModule;
-use defmt::*;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
 use embassy_nrf::{
@@ -74,12 +73,10 @@ async fn main(_spawner: Spawner) {
     let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, CONFIG_SOLAR_SENSOR_AVERAGING_DURATION);
     let upload_channel = embassy_sync::channel::Channel::<embassy_sync::blocking_mutex::raw::NoopRawMutex, _, 4>::new();
     let solar_runner = bt_core::solar_monitor::new(ve_rx, upload_channel.sender());
-
     let cloud_runner = bt_core::net::cloud::new(module, upload_channel.receiver());
 
     let blinky = async {
         loop {
-            info!("loop");
             led.set_high();
             Timer::after_millis(1000).await;
             led.set_low();
