@@ -2,7 +2,6 @@
 #![no_main]
 
 use bt_core::net::cellular::sim_com_a67::SimComCellularModule;
-use defmt::info;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
 use embassy_nrf::{
@@ -25,6 +24,9 @@ bind_interrupts!(struct Irqs {
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = embassy_nrf::init(Default::default());
+
+    //info!("Using backend URL: {}", bt_core::net::cloud::SOLAR_BACKEND_BASE_URL);
+
     let mut led = Output::new(p.P1_12, Level::Low, OutputDrive::Standard);
     let reset = Output::new(p.P0_03, Level::Low, OutputDrive::Standard);
     let pwrkey = Output::new(p.P0_04, Level::Low, OutputDrive::Standard);
@@ -78,9 +80,6 @@ async fn main(_spawner: Spawner) {
 
     let blinky = async {
         loop {
-            let stack_val = 1;
-            let raw = &stack_val as *const i32 as usize;
-            info!("Stack pointer address: {}", raw);
             led.set_high();
             Timer::after_millis(1000).await;
             led.set_low();

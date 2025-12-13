@@ -1,3 +1,5 @@
+require 'net/ssh'
+
 task :publish do
     folders = ['public', 'vendor'] 
     excludes = [
@@ -14,6 +16,7 @@ task :publish do
     exclude_args = excludes.map { |e| "--exclude='#{e}'" }.join(' ')
     sh "rsync -avzh --delete #{exclude_args} ./ bockli@bockmattli.ch:/home/bockli/staging/solar-api"
     sh "scp .env.staging bockli@bockmattli.ch:/home/bockli/staging/solar-api/.env"
+    sh "ssh bockli@bockmattli.ch 'cd /home/bockli/staging/solar-api && php artisan migrate'"    
 end
 
 task :generate do 

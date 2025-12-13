@@ -1,3 +1,4 @@
+use const_format::concatcp;
 use embassy_sync::{blocking_mutex::raw::RawMutex, channel::Receiver};
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_hal::digital::OutputPin;
@@ -9,6 +10,16 @@ use crate::{
     net::cellular::{CellularError, sim_com_a67::SimComCellularModule},
     proto::bt_::solar_::{OfflineEvent, OnlineEvent, StartupEvent, SystemEvent, SystemEvent_::Event},
     time::UtcTime,
+};
+
+pub const SOLAR_BACKEND_BASE_URL: &str = match option_env!("SOLAR_BACKEND_BASE_URL") {
+    Some(value) => value,
+    None => "http:://localhost:8000",
+};
+
+const SOLAR_BACKEND_TOKEN: &str = match option_env!("SOLAR_BACKEND_TOKEN") {
+    Some(value) => value,
+    None => "default-dev-token",
 };
 
 pub struct Runner<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize, const N: usize> {
@@ -94,7 +105,10 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
             Ok(data) => {
                 info!("Uploading {} bytes to cloud...", data.len());
                 let request = self.module.request().await?;
-                let mut response = request.post("http://api.solar.bockmattli.ch/api/v2/solar/reading", data.as_slice()).await?;
+                request.set_header("x-token", SOLAR_BACKEND_TOKEN).await?;
+                let mut response = request
+                    .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/reading"), data.as_slice())
+                    .await?;
                 if response.status().is_ok() {
                     info!("Upload successful");
                 } else {
@@ -147,9 +161,11 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
         let mut buffer = micropb::heapless::Vec::<u8, BUFFER_SIZE>::new();
         let mut encoder = PbEncoder::new(&mut buffer);
         event.encode(&mut encoder).map_err(|_| CellularError::Encoding())?;
-
         let request = self.module.request().await?;
-        let mut response = request.post("http://api.solar.bockmattli.ch/api/v2/solar/event", buffer.as_slice()).await?;
+        request.set_header("x-token", SOLAR_BACKEND_TOKEN).await?;
+        let mut response = request
+            .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"), buffer.as_slice())
+            .await?;
         if response.status().is_ok() {
             info!("Upload successful");
         } else {
