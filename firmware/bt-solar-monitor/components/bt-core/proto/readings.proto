@@ -3,11 +3,11 @@ syntax = "proto3";
 package bt.solar;
 
 message Reading {
-    int32 battery_voltage = 1;  // V    mV
-    int32 battery_current = 2;  // I    mA
-    int32 panel_voltage   = 3;  // VPV  mV 
-    int32 panel_power     = 4;  // PPV  W
-    int32 load_current    = 5;  // IL   mA
+    int32 battery_voltage = 1; // V    mV
+    int32 battery_current = 2; // I    mA
+    int32 panel_voltage   = 3; // VPV  mV
+    int32 panel_power     = 4; // PPV  W
+    int32 load_current    = 5; // IL   mA
 } 
 
 message UploadEntry {
@@ -18,4 +18,25 @@ message UploadEntry {
 message Upload {
     int64 start_timestamp = 6; // Unix timestamp in milliseconds
     repeated UploadEntry entries = 1;
+}
+
+message SystemEvent {
+    int64 timestamp = 1; // Unix timestamp in milliseconds
+    oneof event {
+        StartupEvent startup_event = 10;
+        OnlineEvent online_event = 11;
+        OfflineEvent offline_event = 12;     
+    }
+}
+
+message StartupEvent {
+    uint32 uptime_seconds = 2;
+}
+
+message OnlineEvent {
+    uint32 uptime_seconds = 2;
+}
+
+message OfflineEvent {
+    uint32 uptime_seconds = 2;
 }

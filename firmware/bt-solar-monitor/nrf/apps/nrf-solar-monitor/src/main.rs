@@ -2,6 +2,7 @@
 #![no_main]
 
 use bt_core::net::cellular::sim_com_a67::SimComCellularModule;
+use defmt::info;
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
 use embassy_nrf::{
@@ -13,8 +14,8 @@ use embassy_nrf::{
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
-//const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(5 * 60);
-const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(20);
+const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(5 * 60);
+//const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(20);
 
 bind_interrupts!(struct Irqs {
     UARTE0 => buffered_uarte::InterruptHandler<peripherals::UARTE0>;
@@ -77,6 +78,9 @@ async fn main(_spawner: Spawner) {
 
     let blinky = async {
         loop {
+            let stack_val = 1;
+            let raw = &stack_val as *const i32 as usize;
+            info!("Stack pointer address: {}", raw);
             led.set_high();
             Timer::after_millis(1000).await;
             led.set_low();

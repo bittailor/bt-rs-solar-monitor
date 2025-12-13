@@ -8,6 +8,7 @@ pub enum CellularError {
     Timeout,
     AtError(AtError),
     GpioError,
+    Encoding(),
 }
 
 #[cfg(feature = "defmt")]
@@ -17,6 +18,7 @@ impl defmt::Format for CellularError {
             CellularError::Timeout => defmt::write!(f, "Timeout"),
             CellularError::AtError(e) => defmt::write!(f, "AtError({:?})", e),
             CellularError::GpioError => defmt::write!(f, "GpioError"),
+            CellularError::Encoding() => defmt::write!(f, "Encoding Error"),
         }
     }
 }
@@ -39,6 +41,7 @@ impl embedded_io_async::Error for CellularError {
             CellularError::Timeout => embedded_io_async::ErrorKind::TimedOut,
             CellularError::AtError(_) => embedded_io_async::ErrorKind::Other,
             CellularError::GpioError => embedded_io_async::ErrorKind::Other,
+            CellularError::Encoding() => embedded_io_async::ErrorKind::Other,
         }
     }
 }

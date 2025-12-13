@@ -48,6 +48,6 @@ run:
 
 [working-directory: 'nrf']
 sketch:
-    cargo run --release --bin ve
+    cargo run --release --bin memory
 
   

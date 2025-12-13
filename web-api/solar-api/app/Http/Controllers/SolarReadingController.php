@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use Bt\Solar\Upload;
 use DateTimeImmutable;
+use Bt\Solar\SystemEvent;
 use App\Models\SolarReading;
+use App\Models\Event;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class SolarReadingController extends Controller
 {
-    public function upload(Request $request)
+    public function reading(Request $request)
     {
         $content = $request->getContent();
         $upload = new Upload();
@@ -30,5 +33,19 @@ class SolarReadingController extends Controller
             $solarReading->save();
         }
         return response('', 200)->withHeaders([]);
+    }
+
+    public function event(Request $request)
+    {
+        $content = $request->getContent();
+        $event = new SystemEvent();
+        $event->mergeFromString($content);
+        $json = $event->serializeToJsonString();
+        Log::info("Event received ", ['event' => $json]);
+        $dbEvent = new Event;
+        $dbEvent->timestamp = (new DateTimeImmutable())->setTimestamp($event->getTimestamp());
+        $dbEvent->event = $json;
+        $dbEvent->save();
+        return response('', 200)->withHeaders([]); 
     }
 }

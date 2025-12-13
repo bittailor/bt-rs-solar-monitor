@@ -26,7 +26,8 @@ Route::get('/v2/info', function (Request $request) {
     return "solar api v2";
 });
 
-Route::post('/v2/solar/reading', [SolarReadingController::class, 'upload'])->middleware([StripToMinimalHeaders::class]);
+Route::post('/v2/solar/reading', [SolarReadingController::class, 'reading'])->middleware([StripToMinimalHeaders::class]);
+Route::post('/v2/solar/event', [SolarReadingController::class, 'event'])->middleware([StripToMinimalHeaders::class]);
 
 Route::post('/v2/solar', function (Request $request) {
     $content = $request->getContent();

@@ -14,8 +14,8 @@
             "coreConfigs": [
                 {
                     "coreIndex": 0,
-                    "programBinary": "${workspaceFolder}/target/thumbv8m.main-none-eabihf/debug/lte",
-                    "svdFile": "${userHome}/.pico-sdk/sdk/2.0.0/src/rp2350/hardware_regs/RP2350.svd",
+                    "programBinary": "${workspaceFolder}/nrf/target/thumbv7em-none-eabihf/release/memory",
+                    "svdFile": "${workspaceFolder}/nrf/hw/nrf52840.svd",
                     "rttEnabled": true,
                 }
             ],
