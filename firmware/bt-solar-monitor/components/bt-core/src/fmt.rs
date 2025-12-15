@@ -116,6 +116,7 @@ macro_rules! panic {
 }
 
 #[collapse_debuginfo(yes)]
+#[macro_export]
 macro_rules! trace {
     ($s:literal $(, $x:expr)* $(,)?) => {
         {
@@ -130,6 +131,7 @@ macro_rules! trace {
 }
 
 #[collapse_debuginfo(yes)]
+#[macro_export]
 macro_rules! debug {
     ($s:literal $(, $x:expr)* $(,)?) => {
         {
@@ -144,6 +146,7 @@ macro_rules! debug {
 }
 
 #[collapse_debuginfo(yes)]
+#[macro_export]
 macro_rules! info {
     ($s:literal $(, $x:expr)* $(,)?) => {
         {
@@ -158,6 +161,7 @@ macro_rules! info {
 }
 
 #[collapse_debuginfo(yes)]
+#[macro_export]
 macro_rules! warn {
     ($s:literal $(, $x:expr)* $(,)?) => {
         {
@@ -172,6 +176,7 @@ macro_rules! warn {
 }
 
 #[collapse_debuginfo(yes)]
+#[macro_export]
 macro_rules! error {
     ($s:literal $(, $x:expr)* $(,)?) => {
         {
@@ -187,6 +192,7 @@ macro_rules! error {
 
 #[cfg(feature = "defmt")]
 #[collapse_debuginfo(yes)]
+#[macro_export]
 macro_rules! unwrap {
     ($($x:tt)*) => {
         ::defmt::unwrap!($($x)*)
@@ -195,6 +201,7 @@ macro_rules! unwrap {
 
 #[cfg(not(feature = "defmt"))]
 #[collapse_debuginfo(yes)]
+#[macro_export]
 macro_rules! unwrap {
     ($arg:expr) => {
         match $crate::fmt::Try::into_result($arg) {

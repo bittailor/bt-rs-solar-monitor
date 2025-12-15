@@ -12,15 +12,9 @@ use crate::{
     time::UtcTime,
 };
 
-pub const SOLAR_BACKEND_BASE_URL: &str = match option_env!("SOLAR_BACKEND_BASE_URL") {
-    Some(value) => value,
-    None => "http:://localhost:8000",
-};
+pub const SOLAR_BACKEND_BASE_URL: &str = env!("SOLAR_BACKEND_BASE_URL");
 
-const SOLAR_BACKEND_TOKEN: &str = match option_env!("SOLAR_BACKEND_TOKEN") {
-    Some(value) => value,
-    None => "default-dev-token",
-};
+const SOLAR_BACKEND_TOKEN: &str = env!("SOLAR_BACKEND_TOKEN");
 
 pub struct Runner<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize, const N: usize> {
     cloud_controller: CloudController<'ch, 'a, Output, Ctr, M, B, N>,
@@ -105,7 +99,7 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
             Ok(data) => {
                 info!("Uploading {} bytes to cloud...", data.len());
                 let request = self.module.request().await?;
-                request.set_header("x-token", SOLAR_BACKEND_TOKEN).await?;
+                request.set_header("X-Token", SOLAR_BACKEND_TOKEN).await?;
                 let mut response = request
                     .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/reading"), data.as_slice())
                     .await?;
@@ -162,7 +156,7 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
         let mut encoder = PbEncoder::new(&mut buffer);
         event.encode(&mut encoder).map_err(|_| CellularError::Encoding())?;
         let request = self.module.request().await?;
-        request.set_header("x-token", SOLAR_BACKEND_TOKEN).await?;
+        request.set_header("X-Token", SOLAR_BACKEND_TOKEN).await?;
         let mut response = request
             .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"), buffer.as_slice())
             .await?;
@@ -185,6 +179,7 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
 #[cfg(test)]
 pub mod tests {
     use chrono::NaiveDateTime;
+    use reqwest::header;
     use serial_test::serial;
     use std::fs;
 
@@ -193,7 +188,7 @@ pub mod tests {
     #[serial(bt_time)]
     #[tokio::test]
     #[ignore]
-    async fn check_server_upload() {
+    async fn check_startup_event() {
         let startup = NaiveDateTime::parse_from_str("2025-11-30 12:30:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let mut event = SystemEvent::default();
         event.timestamp = startup.and_utc().timestamp();
@@ -202,8 +197,17 @@ pub mod tests {
         let mut encoder = PbEncoder::new(&mut body_data);
         event.encode(&mut encoder).unwrap();
         let client = reqwest::Client::new();
-        let res = client.post("http://localhost:8000/api/v2/solar/event").body(body_data).send().await.unwrap();
+        let res = client
+            .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"))
+            .header("X-TOKEN", SOLAR_BACKEND_TOKEN)
+            .body(body_data)
+            .send()
+            .await
+            .unwrap();
         let success = res.status().is_success();
+        res.headers().iter().for_each(|(k, v)| {
+            println!("Header: {}: {:?}", k, v);
+        });
         let text = res.text().await.unwrap();
         if !success {
             fs::write("error.html", text).unwrap();

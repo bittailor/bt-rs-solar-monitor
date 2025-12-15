@@ -50,6 +50,10 @@ run:
     cargo run --release --bin nrf-solar-monitor
 
 [working-directory: 'nrf']
+attach:
+    probe-rs attach --chip nRF52840_xxAA target/thumbv7em-none-eabihf/release/nrf-solar-monitor 
+
+[working-directory: 'nrf']
 sketch:
     cargo run --release --bin memory
 

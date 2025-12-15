@@ -5,9 +5,8 @@ use embassy_sync::{
     mutex::{Mutex, MutexGuard},
 };
 
-pub(crate) mod fmt;
-
 pub mod at;
+pub mod fmt;
 pub mod net;
 pub mod sensor;
 pub mod solar_monitor;

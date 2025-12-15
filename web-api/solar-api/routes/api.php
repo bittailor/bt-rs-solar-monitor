@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Middleware\HandleCors;
 use App\Http\Middleware\StripToMinimalHeaders;
 use App\Http\Controllers\SolarReadingController;
+use App\Http\Middleware\ApiToken;
 
 /*
 |--------------------------------------------------------------------------
@@ -26,26 +27,10 @@ Route::get('/v2/info', function (Request $request) {
     return "solar api v2";
 });
 
-Route::post('/v2/solar/reading', [SolarReadingController::class, 'reading'])->middleware([StripToMinimalHeaders::class]);
-Route::post('/v2/solar/event', [SolarReadingController::class, 'event'])->middleware([StripToMinimalHeaders::class]);
-
-Route::post('/v2/solar', function (Request $request) {
-    $content = $request->getContent();
-    $upload = new Upload();
-    $upload->mergeFromString($content);
-    $n = $upload->getEntries()->count();
-    return "$n entries received";
+Route::middleware([ApiToken::class])->group(function () {
+    Route::post('/v2/solar/reading', [SolarReadingController::class, 'reading'])->middleware([StripToMinimalHeaders::class]);
+    Route::post('/v2/solar/event', [SolarReadingController::class, 'event'])->middleware([StripToMinimalHeaders::class]);
 });
 
-/*
-Flight::group('/api/v2', function () {
-    Flight::route('POST /solar', function () {
-        $msg = Flight::request()->getBody();
-        $upload = new Upload();
-        $upload->mergeFromString($msg);
-        $n = $upload->getEntries()->count();
-        Flight::response()->setHeader('Content-Type', 'x');
-        Flight::response()->write("$n entries received");
-    });
-});
-*/
+
+

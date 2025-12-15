@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use bt_core::net::cellular::sim_com_a67::SimComCellularModule;
+use bt_core::{info, net::cellular::sim_com_a67::SimComCellularModule};
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
 use embassy_nrf::{
@@ -25,7 +25,8 @@ bind_interrupts!(struct Irqs {
 async fn main(_spawner: Spawner) {
     let p = embassy_nrf::init(Default::default());
 
-    //info!("Using backend URL: {}", bt_core::net::cloud::SOLAR_BACKEND_BASE_URL);
+    info!("Using backend URL: {}", bt_core::net::cloud::SOLAR_BACKEND_BASE_URL);
+    info!("Using averaging duration: {}", CONFIG_SOLAR_SENSOR_AVERAGING_DURATION.as_secs());
 
     let mut led = Output::new(p.P1_12, Level::Low, OutputDrive::Standard);
     let reset = Output::new(p.P0_03, Level::Low, OutputDrive::Standard);

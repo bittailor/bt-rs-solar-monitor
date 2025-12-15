@@ -7,7 +7,6 @@ pub mod serial_interface;
 pub mod status_control;
 
 use core::mem::{MaybeUninit, replace};
-
 use embassy_futures::select::select;
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
@@ -18,7 +17,7 @@ use embassy_time::{Duration, with_timeout};
 use embedded_io_async::{Read, Write};
 use heapless::{CapacityError, String, Vec};
 
-use crate::LoggingMutexGuard;
+use crate::{LoggingMutexGuard, debug, error, info, trace, warn};
 
 pub const ERROR_STRING_SIZE: usize = 64;
 const CHANNEL_SIZE: usize = 2;

@@ -23,7 +23,6 @@
 # remove the X-Powered-By header
 <IfModule mod_headers.c>
     Header unset X-Powered-By
-    Header unset   
     Header unset Date
     Header unset Server
 </IfModule>
