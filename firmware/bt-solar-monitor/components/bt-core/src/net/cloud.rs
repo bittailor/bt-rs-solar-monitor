@@ -95,10 +95,11 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
     }
 
     async fn handle_connected(&mut self) -> Result<(), CellularError> {
-        match with_timeout(Duration::from_secs(10), self.upload_receiver.receive()).await {
+        match with_timeout(Duration::from_secs(4), self.upload_receiver.receive()).await {
             Ok(data) => {
                 info!("Uploading {} bytes to cloud...", data.len());
                 let request = self.module.request().await?;
+                request.set_header("Connection", "Keep-Alive").await?;
                 request.set_header("X-Token", SOLAR_BACKEND_TOKEN).await?;
                 let mut response = request
                     .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/reading"), data.as_slice())
@@ -156,6 +157,7 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
         let mut encoder = PbEncoder::new(&mut buffer);
         event.encode(&mut encoder).map_err(|_| CellularError::Encoding())?;
         let request = self.module.request().await?;
+        request.set_header("Connection", "Keep-Alive").await?;
         request.set_header("X-Token", SOLAR_BACKEND_TOKEN).await?;
         let mut response = request
             .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"), buffer.as_slice())

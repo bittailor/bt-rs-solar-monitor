@@ -6,13 +6,11 @@ use core::convert::Infallible;
 use bt_core::{info, unwrap};
 #[cfg(feature = "defmt")]
 use defmt_rtt as _;
+use ekv::config;
 use ekv::flash::PageID;
-use ekv::{Config, Database, config};
 use embassy_executor::Spawner;
 use embassy_nrf::rng::Rng;
 use embassy_nrf::{bind_interrupts, pac, peripherals, qspi, rng};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_time::Instant;
 use heapless::Vec;
 use panic_probe as _;
 use rand_core::RngCore;
@@ -77,7 +75,7 @@ async fn main(_spawner: Spawner) -> ! {
 
     // Generate random seed.
     let mut rng = Rng::new(p.RNG, Irqs);
-    let random_seed = rng.next_u32();
+    let _random_seed = rng.next_u32();
 
     // Config for the MX25L3233F (32 Mbit = 4 MB) present in the Particle Xenon board
     // Use READ2O with 8 MHz for reliable initialization

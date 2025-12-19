@@ -30,7 +30,9 @@ async fn main(_spawner: Spawner) {
         Ok(x) => x,
         Err(_) => {
             info!("Watchdog already active with wrong config, waiting for it to timeout...");
-            loop {}
+            loop {
+                Timer::after_millis(250).await;
+            }
         }
     };
 

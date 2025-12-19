@@ -35,8 +35,8 @@ async fn main(_spawner: Spawner) {
     let mut uart_lte_config = uarte::Config::default();
     uart_lte_config.parity = uarte::Parity::EXCLUDED;
     uart_lte_config.baudrate = uarte::Baudrate::BAUD115200;
-    let mut uart_lte_tx_buffer = [0u8; 1024];
-    let mut uart_lte_rx_buffer = [0u8; 1024];
+    let mut uart_lte_tx_buffer = [0u8; 2048];
+    let mut uart_lte_rx_buffer = [0u8; 2048];
     let uart_lte = BufferedUarte::new(
         p.UARTE0,
         p.TIMER0,
@@ -58,8 +58,8 @@ async fn main(_spawner: Spawner) {
     let mut uart_ve_config = uarte::Config::default();
     uart_ve_config.parity = uarte::Parity::EXCLUDED;
     uart_ve_config.baudrate = uarte::Baudrate::BAUD19200;
-    let mut uart_ve_tx_buffer = [0u8; 1024];
-    let mut uart_ve_rx_buffer = [0u8; 1024];
+    let mut uart_ve_tx_buffer = [0u8; 2048];
+    let mut uart_ve_rx_buffer = [0u8; 2048];
     let uart_ve = BufferedUarte::new(
         p.UARTE1,
         p.TIMER1,
@@ -82,9 +82,9 @@ async fn main(_spawner: Spawner) {
     let blinky = async {
         loop {
             led.set_high();
-            Timer::after_millis(1000).await;
+            Timer::after_millis(500).await;
             led.set_low();
-            Timer::after_millis(1000).await;
+            Timer::after_millis(500).await;
         }
     };
 

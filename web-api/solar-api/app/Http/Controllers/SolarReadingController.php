@@ -18,6 +18,7 @@ class SolarReadingController extends Controller
         $upload = new Upload();
         $upload->mergeFromString($content);
         $n = $upload->getEntries()->count();
+        Log::info("Upload received ", ['entries' => $n]);
         $startTimestamp = $upload->getStartTimestamp();
         foreach ($upload->getEntries() as $entry) {
             $reading = $entry->getReading();

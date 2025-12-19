@@ -12,6 +12,8 @@ ci: build test clippy
 
 build: build_components build_nrf
 
+clean: clean_components clean_nrf
+
 clippy: clippy_components clippy_nrf
 
 test: test_components
@@ -30,6 +32,9 @@ clippy_components:
     cargo clippy --features defmt
     cargo clippy --release --features defmt --target thumbv7em-none-eabihf
 
+clean_components:
+    cargo clean
+
 [working-directory: 'nrf']
 build_nrf:
     cargo build --release 
@@ -38,6 +43,10 @@ build_nrf:
 clippy_nrf:
     cargo clippy --release
     
+[working-directory: 'nrf']
+clean_nrf:
+    cargo clean
+
 test_components:
     cargo test --features log
 

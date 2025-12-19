@@ -112,7 +112,11 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
         crate::at::serial_interface::read_sleep_mode(&self.at_client).await.map_err(Into::into)
     }
 
-    pub async fn set_sleep_mode(&self, mode: SleepMode) -> Result<(), CellularError> {
+    pub async fn set_sleep_mode(&mut self, mode: SleepMode) -> Result<(), CellularError> {
+        if self.http_initialized {
+            crate::at::http::term(&self.at_client).await?;
+            self.http_initialized = false;
+        }
         crate::at::serial_interface::set_sleep_mode(&self.at_client, mode).await.map_err(Into::into)
     }
 
