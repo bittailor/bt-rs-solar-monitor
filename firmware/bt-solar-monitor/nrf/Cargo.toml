@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 
-members = ["apps/*"]
+members = ["apps/*", "components/*"]
+
 
 [profile.release]
 # Enable generation of debug symbols even on release builds

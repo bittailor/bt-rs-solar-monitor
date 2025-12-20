@@ -73,9 +73,21 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-io-async",
  "heapless 0.9.2",
+ "log",
  "micropb",
  "micropb-gen",
  "nom",
+]
+
+[[package]]
+name = "bt-nrf"
+version = "0.1.0"
+dependencies = [
+ "bt-core",
+ "defmt 1.0.1",
+ "ekv",
+ "embassy-nrf",
+ "log",
 ]
 
 [[package]]
@@ -981,6 +993,7 @@ name = "sketch"
 version = "0.1.0"
 dependencies = [
  "bt-core",
+ "bt-nrf",
  "cortex-m",
  "cortex-m-rt",
  "defmt 1.0.1",

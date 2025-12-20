@@ -1,0 +1,24 @@
+[package]
+name = "bt-nrf"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+defmt = ["dep:defmt", "bt-core/defmt", "ekv/defmt"]
+log = ["dep:log", "bt-core/log"]
+default = ["defmt"]
+
+[dependencies]
+defmt = { version = "1.0.1", optional = true }
+log = { version = "0.4.27", optional = true }
+
+bt-core = { path = "../../../components/bt-core", features = ["defmt"] }
+ekv = { version = "1.0.0", git = "https://github.com/embassy-rs/ekv" }
+embassy-nrf = { version = "0.8.0", features = [
+    "defmt",
+    "nrf52840",
+    "time-driver-rtc1",
+    "gpiote",
+    "unstable-pac",
+    "time",
+] }
