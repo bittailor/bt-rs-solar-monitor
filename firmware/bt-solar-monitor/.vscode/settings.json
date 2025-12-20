@@ -1,4 +1,18 @@
 {
+    "rust-analyzer.cargo.extraEnv": {
+        "SOLAR_BACKEND_BASE_URL": "http://localhost:8000",
+        "SOLAR_BACKEND_TOKEN": "default-dev-token"
+    },
+    "rust-analyzer.runnables.extraEnv": {
+        "SOLAR_BACKEND_BASE_URL": "http://localhost:8000",
+        "SOLAR_BACKEND_TOKEN": "default-dev-token"
+    },
+    /*
+    "rust-analyzer.runnables.extraEnv": {
+        "SOLAR_BACKEND_BASE_URL": "https://api.solar.bockmattli.ch",
+        "SOLAR_BACKEND_TOKEN": "vY4MTyFV130Re65f"
+    },
+    */
     "rust-analyzer.linkedProjects": [
         // order is important (rust-analyzer/rust-analyzer#7764)
         "Cargo.toml",

@@ -1,3 +1,6 @@
+set dotenv-required := true
+set dotenv-load := true
+
 host_target := if os() == "macos" { "aarch64-apple-darwin" } else if os() == "windows" { "x86_64-pc-windows-msvc" } else { "x86_64-unknown-linux-gnu" } 
 
 host_excludes := "sketch nrf-solar-monitor"
@@ -8,6 +11,8 @@ default: build test clippy size
 ci: build test clippy
 
 build: build_components build_nrf
+
+clean: clean_components clean_nrf
 
 clippy: clippy_components clippy_nrf
 
@@ -27,6 +32,9 @@ clippy_components:
     cargo clippy --features defmt
     cargo clippy --release --features defmt --target thumbv7em-none-eabihf
 
+clean_components:
+    cargo clean
+
 [working-directory: 'nrf']
 build_nrf:
     cargo build --release 
@@ -35,8 +43,12 @@ build_nrf:
 clippy_nrf:
     cargo clippy --release
     
+[working-directory: 'nrf']
+clean_nrf:
+    cargo clean
+
 test_components:
-    cargo test
+    cargo test --features log
 
 [working-directory: 'nrf']
 size_nrf:
@@ -47,7 +59,11 @@ run:
     cargo run --release --bin nrf-solar-monitor
 
 [working-directory: 'nrf']
+attach:
+    probe-rs attach --chip nRF52840_xxAA target/thumbv7em-none-eabihf/release/nrf-solar-monitor 
+
+[working-directory: 'nrf']
 sketch:
-    cargo run --release --bin ve
+    cargo run --release --bin memory
 
   

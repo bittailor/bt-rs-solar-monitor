@@ -1,13 +1,14 @@
 use core::str::{self};
 
 use chrono::NaiveDateTime;
+use embassy_futures::yield_now;
 use embassy_time::{Duration, Timer, WithTimeout};
 use embedded_hal::digital::OutputPin;
 use embedded_io_async::Read;
 
 use crate::{
     at::{AtClient, AtController, http::HttpStatusCode, network::NetworkRegistrationState, serial_interface::SleepMode, status_control::Rssi},
-    net::cellular::{CellularError, CellularModule},
+    net::cellular::CellularError,
 };
 
 pub struct SimComCellularModule<'ch, Output: OutputPin, Ctr: AtController> {
@@ -15,32 +16,6 @@ pub struct SimComCellularModule<'ch, Output: OutputPin, Ctr: AtController> {
     pwrkey: Output,
     reset: Output,
     http_initialized: bool,
-}
-
-impl<'ch, Output: OutputPin, Ctr: AtController> CellularModule for SimComCellularModule<'ch, Output, Ctr> {
-    async fn reset(&mut self) -> Result<(), CellularError> {
-        self.reset().await
-    }
-
-    async fn power_cycle(&mut self) -> Result<(), CellularError> {
-        self.power_cycle().await
-    }
-
-    async fn startup_network(&mut self, apn: &str) -> Result<(), CellularError> {
-        self.set_apn(apn).await?;
-
-        while self.read_network_registration().await?.1 != NetworkRegistrationState::Registered {
-            warn!("Not registered to network yet, waiting...");
-            Timer::after_secs(1).await;
-            info!("... retrying ...");
-        }
-        let _rtc = self.query_real_time_clock().await?;
-        Ok(())
-    }
-
-    async fn query_real_time_clock(&self) -> Result<NaiveDateTime, CellularError> {
-        self.query_real_time_clock().await
-    }
 }
 
 impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output, Ctr> {
@@ -78,6 +53,18 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
         self.ensure_at(Duration::from_secs(10)).await?;
         info!("... power on done");
         crate::at::network::set_automatic_time_and_time_zone_update(&self.at_client, true).await?;
+        Ok(())
+    }
+
+    pub async fn startup_network(&mut self, apn: &str) -> Result<(), CellularError> {
+        self.set_apn(apn).await?;
+
+        while self.read_network_registration().await?.1 != NetworkRegistrationState::Registered {
+            warn!("Not registered to network yet, waiting...");
+            Timer::after_secs(1).await;
+            info!("... retrying ...");
+        }
+        let _rtc = self.query_real_time_clock().await?;
         Ok(())
     }
 
@@ -125,8 +112,26 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
         crate::at::serial_interface::read_sleep_mode(&self.at_client).await.map_err(Into::into)
     }
 
-    pub async fn set_sleep_mode(&self, mode: SleepMode) -> Result<(), CellularError> {
+    pub async fn set_sleep_mode(&mut self, mode: SleepMode) -> Result<(), CellularError> {
+        if self.http_initialized {
+            crate::at::http::term(&self.at_client).await?;
+            self.http_initialized = false;
+        }
         crate::at::serial_interface::set_sleep_mode(&self.at_client, mode).await.map_err(Into::into)
+    }
+
+    pub async fn wake_up(&self) -> Result<(), CellularError> {
+        self.is_alive().await;
+        while !self.is_alive().await {
+            warn!("LTE module not alive, retrying...");
+            yield_now().await;
+        }
+        while self.read_network_registration().await?.1 != crate::at::network::NetworkRegistrationState::Registered {
+            warn!("Not registered to network yet, waiting...");
+            Timer::after_secs(2).await;
+            info!("... retrying ...");
+        }
+        Ok(())
     }
 
     pub async fn query_signal_quality(&self) -> Result<Rssi, CellularError> {

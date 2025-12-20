@@ -1,0 +1,1 @@
+Select * from `solar-api`.solar_readings

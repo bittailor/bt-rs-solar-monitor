@@ -1,7 +1,5 @@
 #![allow(async_fn_in_trait)]
 
-use chrono::NaiveDateTime;
-
 use crate::at::AtError;
 pub mod sim_com_a67;
 
@@ -10,6 +8,7 @@ pub enum CellularError {
     Timeout,
     AtError(AtError),
     GpioError,
+    Encoding(),
 }
 
 #[cfg(feature = "defmt")]
@@ -19,6 +18,7 @@ impl defmt::Format for CellularError {
             CellularError::Timeout => defmt::write!(f, "Timeout"),
             CellularError::AtError(e) => defmt::write!(f, "AtError({:?})", e),
             CellularError::GpioError => defmt::write!(f, "GpioError"),
+            CellularError::Encoding() => defmt::write!(f, "Encoding Error"),
         }
     }
 }
@@ -41,13 +41,7 @@ impl embedded_io_async::Error for CellularError {
             CellularError::Timeout => embedded_io_async::ErrorKind::TimedOut,
             CellularError::AtError(_) => embedded_io_async::ErrorKind::Other,
             CellularError::GpioError => embedded_io_async::ErrorKind::Other,
+            CellularError::Encoding() => embedded_io_async::ErrorKind::Other,
         }
     }
-}
-
-pub trait CellularModule {
-    async fn reset(&mut self) -> Result<(), CellularError>;
-    async fn power_cycle(&mut self) -> Result<(), CellularError>;
-    async fn startup_network(&mut self, apn: &str) -> Result<(), CellularError>;
-    async fn query_real_time_clock(&self) -> Result<NaiveDateTime, CellularError>;
 }

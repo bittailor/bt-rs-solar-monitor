@@ -20,7 +20,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - uses: extractions/setup-just@v3 
+    - name: Install protoc
+      run: | 
+        sudo apt-get install -y protobuf-compiler
+        protoc --version 
+    - name: Setup .env from .env.development
+      run: cp .env.development .env
     - name: Build, Test, Lint
       run: just ci
-
-

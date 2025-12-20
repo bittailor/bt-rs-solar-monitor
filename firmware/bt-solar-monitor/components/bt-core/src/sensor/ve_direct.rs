@@ -47,11 +47,11 @@ impl Averaging {
 #[derive(Default, Debug)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Reading {
-    battery_voltage: f32, // V
-    battery_current: f32, // I
-    panel_voltage: f32,   // VPV
-    panel_power: f32,     // PPV
-    load_current: f32,    // IL
+    pub battery_voltage: f32, // V
+    pub battery_current: f32, // I
+    pub panel_voltage: f32,   // VPV
+    pub panel_power: f32,     // PPV
+    pub load_current: f32,    // IL
 }
 
 pub struct Runner<'a, Stream: Read + Write, const N: usize> {

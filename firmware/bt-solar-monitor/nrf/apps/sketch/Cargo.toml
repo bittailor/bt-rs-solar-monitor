@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-defmt = ["dep:defmt", "dep:defmt-rtt", "dep:panic-probe"]
+defmt = ["dep:defmt", "dep:defmt-rtt", "dep:panic-probe", "ekv/defmt"]
 log = ["dep:log"]
 default = ["defmt"]
 
@@ -47,6 +47,15 @@ embassy-nrf = { version = "0.8.0", features = [
   "gpiote",
   "unstable-pac",
   "time",
+] }
+
+rand_core = { version = "0.9.3", default-features = false }
+
+ekv = { git = "https://github.com/embassy-rs/ekv", features = [
+  "crc",
+  "page-size-4096",
+  "align-4",
+  "max-page-count-1024",
 ] }
 
 bt-core = { path = "../../../components/bt-core", features = ["defmt"] }

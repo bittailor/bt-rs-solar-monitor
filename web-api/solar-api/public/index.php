@@ -1,49 +1,55 @@
 <?php
 
-require_once __DIR__.'/../vendor/autoload.php';
+use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Http\Request;
 
-Flight::path(__DIR__.'/../');
+define('LARAVEL_START', microtime(true));
 
+/*
+|--------------------------------------------------------------------------
+| Check If The Application Is Under Maintenance
+|--------------------------------------------------------------------------
+|
+| If the application is in maintenance / demo mode via the "down" command
+| we will load this file so that any pre-rendered content can be shown
+| instead of starting the framework, which could cause an exception.
+|
+*/
 
-// Then define a route and assign a function to handle the request.
-Flight::route('/', function () {
-  echo '<ul><li><a href="/api/v1/solar">solar</a></li><li><a href="/api/v1/lte">lte</a></li></ul>';
-});
+if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
+    require $maintenance;
+}
 
-Flight::route('/info', function () {
-  phpinfo();
-});
+/*
+|--------------------------------------------------------------------------
+| Register The Auto Loader
+|--------------------------------------------------------------------------
+|
+| Composer provides a convenient, automatically generated class loader for
+| this application. We just need to utilize it! We'll simply require it
+| into the script here so we don't need to manually load our classes.
+|
+*/
 
-Flight::group('/api/v1', function () {
-    Flight::route('GET /solar', function () {
-        Flight::response()->setHeader('Content-Type', 'x');
-        Flight::response()->write("solar data\r\n<one>\r\n<two>\r\n<tree>");
-    });
-    Flight::route('GET /lte', function () {
-        Flight::response()->setHeader('Content-Type', 'x');
-        Flight::response()->write("lte data");
-    });
-    Flight::route('POST /solar', function () {
-        $msg = Flight::request()->getBody();
-        $hex = bin2hex($msg);
-        Flight::response()->setHeader('Content-Type', 'x');
-        Flight::response()->write("solar data <- $msg [$hex]");
-    });
-    Flight::route('/solar/headers', function () {
-        $msg = Flight::request()->headers();
-        Flight::response()->setHeader('Content-Type', 'text/plain');
-        Flight::response()->write("Headers:\n");
-        foreach ($msg as $k => $v) {
-            Flight::response()->write(" - $k: $v\n");
-        }
-    });
-    Flight::route('POST /lte', function () {
-        $msg = Flight::request()->getBody();
-        $hex = bin2hex($msg);
-        Flight::response()->setHeader('Content-Type', 'x');
-        Flight::response()->write("lte data <- $msg [$hex]");
-    });
-});
+require __DIR__.'/../vendor/autoload.php';
 
-// Finally, start the framework.
-Flight::start();
+/*
+|--------------------------------------------------------------------------
+| Run The Application
+|--------------------------------------------------------------------------
+|
+| Once we have the application, we can handle the incoming request using
+| the application's HTTP kernel. Then, we will send the response back
+| to this client's browser, allowing them to enjoy our application.
+|
+*/
+
+$app = require_once __DIR__.'/../bootstrap/app.php';
+
+$kernel = $app->make(Kernel::class);
+
+$response = $kernel->handle(
+    $request = Request::capture()
+)->send();
+
+$kernel->terminate($request, $response);

@@ -4,7 +4,7 @@ RUN mv "$PHP_INI_DIR/php.ini-development" "$PHP_INI_DIR/php.ini"
 
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends --no-install-suggests \ 
-        git ruby openssh-client rsync default-mysql-client mariadb-client zip unzip libpng-dev \
+        git ruby openssh-client rsync default-mysql-client mariadb-client zip unzip libpng-dev protobuf-compiler \
     && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
 RUN gem install net-ssh
@@ -17,6 +17,10 @@ RUN pecl install xdebug \
     && rm -rf /tmp/pear
 
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
+RUN composer global require laravel/installer
+
+ENV PATH="$PATH:/root/.composer/vendor/bin"
 
 RUN a2enmod rewrite && a2enmod negotiation && a2enmod headers
 

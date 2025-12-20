@@ -7,7 +7,6 @@ pub mod serial_interface;
 pub mod status_control;
 
 use core::mem::{MaybeUninit, replace};
-
 use embassy_futures::select::select;
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
@@ -18,7 +17,7 @@ use embassy_time::{Duration, with_timeout};
 use embedded_io_async::{Read, Write};
 use heapless::{CapacityError, String, Vec};
 
-use crate::LoggingMutexGuard;
+use crate::{LoggingMutexGuard, debug, error, info, trace, warn};
 
 pub const ERROR_STRING_SIZE: usize = 64;
 const CHANNEL_SIZE: usize = 2;
@@ -324,7 +323,6 @@ pub trait AtController {
     async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError>;
     async fn handle_http_read(&mut self, buf: &mut [u8], offset: usize) -> Result<(), AtError>;
     async fn handle_http_write(&mut self, buf: &[u8]) -> Result<(), AtError>;
-
     async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE>;
 }
 
@@ -424,7 +422,7 @@ impl<S: Read + Write> AtControllerImpl<S> {
         match with_timeout(timeout, async {
             loop {
                 let line = self.read_line().await?;
-                if line == "OK" || line == "SUCCESS" {
+                if line == "OK" || line == "DOWNLOAD" {
                     debug!("{} => success => {} response lines", line, lines.len());
                     break Ok(());
                 } else if line == "ERROR" {

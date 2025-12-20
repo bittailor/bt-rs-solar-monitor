@@ -1,7 +1,25 @@
+require 'net/ssh'
+
 task :publish do
     folders = ['public', 'vendor'] 
-    folders.each do |folder|
-        puts "Syncing #{folder} ..."
-        sh "rsync -avzh --delete ./#{folder}/ bockli@bockmattli.ch:/home/bockli/staging/solar-api/#{folder}"
-    end
+    excludes = [
+        '.devcontainer',
+        '.docker',
+        '.vscode',
+        '.gitignore',
+        '.env',
+        '.env.staging',
+        'tmp',
+        'Rakefile',
+    ]
+
+    exclude_args = excludes.map { |e| "--exclude='#{e}'" }.join(' ')
+    sh "rsync -avzh --delete #{exclude_args} ./ bockli@bockmattli.ch:/home/bockli/staging/solar-api"
+    sh "scp .env.staging bockli@bockmattli.ch:/home/bockli/staging/solar-api/.env"
+    sh "ssh bockli@bockmattli.ch 'cd /home/bockli/staging/solar-api && php artisan migrate'"    
+end
+
+task :generate do 
+    sh "rm -rf ./generated && mkdir -p ./generated/"
+    sh "protoc --proto_path=../../firmware/bt-solar-monitor/components/bt-core/proto --php_out=./generated/ ../../firmware/bt-solar-monitor/components/bt-core/proto/readings.proto" 
 end

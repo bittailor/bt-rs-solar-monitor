@@ -1,8 +1,7 @@
 #![no_std]
 #![no_main]
 
-use bt_core::net::cellular::sim_com_a67::SimComCellularModule;
-use defmt::*;
+use bt_core::{info, net::cellular::sim_com_a67::SimComCellularModule};
 use embassy_executor::Spawner;
 use embassy_futures::join::*;
 use embassy_nrf::{
@@ -14,8 +13,8 @@ use embassy_nrf::{
 use embassy_time::Timer;
 use {defmt_rtt as _, panic_probe as _};
 
-//const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(5 * 60);
-const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(20);
+const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(5 * 60);
+//const CONFIG_SOLAR_SENSOR_AVERAGING_DURATION: embassy_time::Duration = embassy_time::Duration::from_secs(20);
 
 bind_interrupts!(struct Irqs {
     UARTE0 => buffered_uarte::InterruptHandler<peripherals::UARTE0>;
@@ -25,6 +24,10 @@ bind_interrupts!(struct Irqs {
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = embassy_nrf::init(Default::default());
+
+    info!("Using backend URL: {}", bt_core::net::cloud::SOLAR_BACKEND_BASE_URL);
+    info!("Using averaging duration: {}", CONFIG_SOLAR_SENSOR_AVERAGING_DURATION.as_secs());
+
     let mut led = Output::new(p.P1_12, Level::Low, OutputDrive::Standard);
     let reset = Output::new(p.P0_03, Level::Low, OutputDrive::Standard);
     let pwrkey = Output::new(p.P0_04, Level::Low, OutputDrive::Standard);
@@ -32,8 +35,8 @@ async fn main(_spawner: Spawner) {
     let mut uart_lte_config = uarte::Config::default();
     uart_lte_config.parity = uarte::Parity::EXCLUDED;
     uart_lte_config.baudrate = uarte::Baudrate::BAUD115200;
-    let mut uart_lte_tx_buffer = [0u8; 1024];
-    let mut uart_lte_rx_buffer = [0u8; 1024];
+    let mut uart_lte_tx_buffer = [0u8; 2048];
+    let mut uart_lte_rx_buffer = [0u8; 2048];
     let uart_lte = BufferedUarte::new(
         p.UARTE0,
         p.TIMER0,
@@ -55,8 +58,8 @@ async fn main(_spawner: Spawner) {
     let mut uart_ve_config = uarte::Config::default();
     uart_ve_config.parity = uarte::Parity::EXCLUDED;
     uart_ve_config.baudrate = uarte::Baudrate::BAUD19200;
-    let mut uart_ve_tx_buffer = [0u8; 1024];
-    let mut uart_ve_rx_buffer = [0u8; 1024];
+    let mut uart_ve_tx_buffer = [0u8; 2048];
+    let mut uart_ve_rx_buffer = [0u8; 2048];
     let uart_ve = BufferedUarte::new(
         p.UARTE1,
         p.TIMER1,
@@ -72,17 +75,16 @@ async fn main(_spawner: Spawner) {
     );
     let mut ve_state = bt_core::sensor::ve_direct::State::<8>::new();
     let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, CONFIG_SOLAR_SENSOR_AVERAGING_DURATION);
-    let solar_runner = bt_core::solar_monitor::new(ve_rx);
-
-    let cloud_runner = bt_core::net::cloud::new(module);
+    let upload_channel = embassy_sync::channel::Channel::<embassy_sync::blocking_mutex::raw::NoopRawMutex, _, 4>::new();
+    let solar_runner = bt_core::solar_monitor::new(ve_rx, upload_channel.sender());
+    let cloud_runner = bt_core::net::cloud::new(module, upload_channel.receiver());
 
     let blinky = async {
         loop {
-            info!("loop");
             led.set_high();
-            Timer::after_millis(1000).await;
+            Timer::after_millis(500).await;
             led.set_low();
-            Timer::after_millis(1000).await;
+            Timer::after_millis(500).await;
         }
     };
 
