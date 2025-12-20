@@ -64,6 +64,6 @@ attach:
 
 [working-directory: 'nrf']
 sketch:
-    cargo run --release --bin memory
+    cargo run --release --bin flash
 
   

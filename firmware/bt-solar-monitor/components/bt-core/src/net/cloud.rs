@@ -179,7 +179,6 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
 #[cfg(test)]
 pub mod tests {
     use chrono::NaiveDateTime;
-    use reqwest::header;
     use serial_test::serial;
     use std::fs;
 
