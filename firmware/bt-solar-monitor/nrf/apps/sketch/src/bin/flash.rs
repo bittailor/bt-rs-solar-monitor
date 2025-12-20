@@ -27,6 +27,11 @@ const FLASH_SIZE: usize = 4 * 1024 * 1024; // 4 MB
 const PAGE_SIZE: usize = 4 * 1024; // 4 KB (sector size, minimum erase unit)
 const PAGE_COUNT: usize = FLASH_SIZE / PAGE_SIZE; // 1024 pages
 const ALIGN: usize = 4; // QSPI requires 4-byte alignment
+const PROGRAM_SIZE: usize = 256; // MX25L3233F page program size
+
+// Flash command opcodes
+const CMD_READ_STATUS: u8 = 0x05;
+const CMD_WRITE_ENABLE: u8 = 0x06;
 
 // Aligned buffer wrapper for QSPI operations
 #[repr(align(4))]
@@ -48,11 +53,22 @@ impl<'a> FlashDriver<'a> {
         }
     }
 
+    /// Check if address and buffer are properly aligned for QSPI
+    fn is_aligned(addr: u32, buffer: &[u8]) -> bool {
+        let ptr_addr = buffer.as_ptr() as usize;
+        addr % ALIGN as u32 == 0 && ptr_addr % ALIGN == 0 && buffer.len() % ALIGN == 0
+    }
+
+    /// Round up size to alignment boundary
+    fn align_up(size: usize) -> usize {
+        (size + ALIGN - 1) / ALIGN * ALIGN
+    }
+
     /// Wait for the flash to be ready (WIP bit cleared)
     async fn wait_ready(&mut self) -> Result<(), Infallible> {
         loop {
             let mut status = [0u8; 1];
-            self.qspi.custom_instruction(0x05, &[], &mut status).await.unwrap();
+            self.qspi.custom_instruction(CMD_READ_STATUS, &[], &mut status).await.unwrap();
             if status[0] & 0x01 == 0 {
                 break;
             }
@@ -62,7 +78,41 @@ impl<'a> FlashDriver<'a> {
 
     /// Enable writes (required before erase/write operations)
     async fn write_enable(&mut self) -> Result<(), Infallible> {
-        self.qspi.custom_instruction(0x06, &[], &mut []).await.unwrap();
+        self.qspi.custom_instruction(CMD_WRITE_ENABLE, &[], &mut []).await.unwrap();
+        Ok(())
+    }
+
+    /// Perform aligned read using temporary buffer
+    async fn read_unaligned(&mut self, addr: u32, data: &mut [u8]) -> Result<(), Infallible> {
+        let len = data.len();
+        let mut remaining = len;
+        let mut offset = 0;
+
+        while remaining > 0 {
+            let chunk_size = remaining.min(self.aligned_buffer.data.len());
+            let aligned_size = Self::align_up(chunk_size);
+
+            self.qspi
+                .read(addr + offset as u32, &mut self.aligned_buffer.data[..aligned_size])
+                .await
+                .unwrap();
+            data[offset..offset + chunk_size].copy_from_slice(&self.aligned_buffer.data[..chunk_size]);
+
+            remaining -= chunk_size;
+            offset += chunk_size;
+        }
+        Ok(())
+    }
+
+    /// Perform aligned write using temporary buffer
+    async fn write_unaligned(&mut self, addr: u32, data: &[u8]) -> Result<(), Infallible> {
+        let aligned_size = Self::align_up(data.len());
+        self.aligned_buffer.data[..data.len()].copy_from_slice(data);
+        // Pad with 0xFF (erased flash value)
+        for i in data.len()..aligned_size {
+            self.aligned_buffer.data[i] = 0xFF;
+        }
+        self.qspi.write(addr, &self.aligned_buffer.data[..aligned_size]).await.unwrap();
         Ok(())
     }
 }
@@ -81,11 +131,9 @@ impl<'a> ekv::flash::Flash for FlashDriver<'a> {
 
         self.wait_ready().await?;
         self.write_enable().await?;
-
-        // Use QSPI erase method instead of custom_instruction
         self.qspi.erase(addr).await.unwrap();
-
         self.wait_ready().await?;
+
         Ok(())
     }
 
@@ -94,30 +142,10 @@ impl<'a> ekv::flash::Flash for FlashDriver<'a> {
 
         self.wait_ready().await?;
 
-        // Check if buffer is aligned
-        let ptr_addr = data.as_ptr() as usize;
-        if ptr_addr % ALIGN == 0 && data.len() % ALIGN == 0 && addr % ALIGN as u32 == 0 {
-            // Aligned case - direct read
+        if Self::is_aligned(addr, data) {
             self.qspi.read(addr, data).await.unwrap();
         } else {
-            // Unaligned case - use aligned buffer
-            let len = data.len();
-            let mut remaining = len;
-            let mut offset_in_data = 0;
-
-            while remaining > 0 {
-                let chunk_size = remaining.min(self.aligned_buffer.data.len());
-                let aligned_size = (chunk_size + ALIGN - 1) / ALIGN * ALIGN; // Round up to alignment
-
-                self.qspi
-                    .read(addr + offset_in_data as u32, &mut self.aligned_buffer.data[..aligned_size])
-                    .await
-                    .unwrap();
-                data[offset_in_data..offset_in_data + chunk_size].copy_from_slice(&self.aligned_buffer.data[..chunk_size]);
-
-                remaining -= chunk_size;
-                offset_in_data += chunk_size;
-            }
+            self.read_unaligned(addr, data).await?;
         }
 
         Ok(())
@@ -125,34 +153,21 @@ impl<'a> ekv::flash::Flash for FlashDriver<'a> {
 
     async fn write(&mut self, page_id: PageID, offset: usize, data: &[u8]) -> Result<(), Self::Error> {
         let addr = (page_id.index() * PAGE_SIZE + offset) as u32;
-
-        // MX25L3233F has 256-byte page program size
-        const PROGRAM_SIZE: usize = 256;
-
         let len = data.len();
         let mut offset_in_data = 0;
 
         while offset_in_data < len {
             let chunk_size = (len - offset_in_data).min(PROGRAM_SIZE);
             let chunk_addr = addr + offset_in_data as u32;
+            let chunk = &data[offset_in_data..offset_in_data + chunk_size];
 
             self.wait_ready().await?;
             self.write_enable().await?;
 
-            // Check alignment
-            let chunk_ptr = unsafe { data.as_ptr().add(offset_in_data) } as usize;
-            if chunk_ptr % ALIGN == 0 && chunk_size % ALIGN == 0 && chunk_addr % ALIGN as u32 == 0 {
-                // Aligned case - direct write
-                self.qspi.write(chunk_addr, &data[offset_in_data..offset_in_data + chunk_size]).await.unwrap();
+            if Self::is_aligned(chunk_addr, chunk) {
+                self.qspi.write(chunk_addr, chunk).await.unwrap();
             } else {
-                // Unaligned case - use aligned buffer
-                let aligned_size = (chunk_size + ALIGN - 1) / ALIGN * ALIGN; // Round up
-                self.aligned_buffer.data[..chunk_size].copy_from_slice(&data[offset_in_data..offset_in_data + chunk_size]);
-                // Pad with 0xFF if needed
-                for i in chunk_size..aligned_size {
-                    self.aligned_buffer.data[i] = 0xFF;
-                }
-                self.qspi.write(chunk_addr, &self.aligned_buffer.data[..aligned_size]).await.unwrap();
+                self.write_unaligned(chunk_addr, chunk).await?;
             }
 
             offset_in_data += chunk_size;
