@@ -18,6 +18,10 @@ mod proto {
     include!(concat!(env!("OUT_DIR"), "/generated_proto.rs"));
 }
 
+pub mod config {
+    include!(concat!(env!("OUT_DIR"), "/consts.rs"));
+}
+
 struct LoggingMutexGuard<'a, M, T>
 where
     M: RawMutex,

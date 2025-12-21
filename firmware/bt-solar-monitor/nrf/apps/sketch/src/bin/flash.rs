@@ -125,7 +125,9 @@ async fn main(_spawner: Spawner) -> ! {
     info!("Done in {} ms! {}ms/key", ms, ms / KEY_COUNT as u64);
 
     info!("ALL DONE");
-    loop {}
+    loop {
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+    }
 }
 
 fn make_key(i: usize) -> [u8; 2] {

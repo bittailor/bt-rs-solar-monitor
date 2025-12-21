@@ -9,8 +9,6 @@ use embassy_executor::Spawner;
 use embassy_nrf::rng::Rng;
 use embassy_nrf::{bind_interrupts, pac, peripherals, qspi, rng};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_time::Instant;
-use heapless::Vec;
 use panic_probe as _;
 use rand_core::RngCore;
 
@@ -114,20 +112,7 @@ async fn main(_spawner: Spawner) -> ! {
     }
 
     info!("ALL DONE");
-    loop {}
-}
-
-fn make_key(i: usize) -> [u8; 2] {
-    (i as u16).to_be_bytes()
-}
-
-fn make_value(i: usize) -> Vec<u8, 16> {
-    let len = (i * 7) % 16;
-    let mut v = Vec::new();
-    v.resize(len, 0).unwrap();
-
-    let val = i.to_le_bytes();
-    let n = val.len().min(len);
-    v[..n].copy_from_slice(&val[..n]);
-    v
+    loop {
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+    }
 }

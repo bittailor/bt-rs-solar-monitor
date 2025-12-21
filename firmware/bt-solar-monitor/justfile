@@ -63,7 +63,8 @@ attach:
     probe-rs attach --chip nRF52840_xxAA target/thumbv7em-none-eabihf/release/nrf-solar-monitor 
 
 [working-directory: 'nrf']
-sketch:
-    cargo run --release --bin flash_try_one
+sketch bin:
+    echo "Running sketch app {{bin}}"
+    cargo run --release --bin {{bin}}
 
   

@@ -51,12 +51,12 @@ impl<'a> QspiFlashDriver<'a> {
     /// Check if address and buffer are properly aligned for QSPI
     fn is_aligned(addr: u32, buffer: &[u8]) -> bool {
         let ptr_addr = buffer.as_ptr() as usize;
-        addr % ALIGN as u32 == 0 && ptr_addr % ALIGN == 0 && buffer.len() % ALIGN == 0
+        addr.is_multiple_of(ALIGN as u32) && ptr_addr.is_multiple_of(ALIGN) && buffer.len().is_multiple_of(ALIGN)
     }
 
     /// Round up size to alignment boundary
     fn align_up(size: usize) -> usize {
-        (size + ALIGN - 1) / ALIGN * ALIGN
+        size.div_ceil(ALIGN) * ALIGN
     }
 
     /// Wait for the flash to be ready (WIP bit cleared)

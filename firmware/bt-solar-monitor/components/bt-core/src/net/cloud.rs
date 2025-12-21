@@ -12,10 +12,6 @@ use crate::{
     time::UtcTime,
 };
 
-pub const SOLAR_BACKEND_BASE_URL: &str = env!("SOLAR_BACKEND_BASE_URL");
-
-const SOLAR_BACKEND_TOKEN: &str = env!("SOLAR_BACKEND_TOKEN");
-
 pub struct Runner<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize, const N: usize> {
     cloud_controller: CloudController<'ch, 'a, Output, Ctr, M, B, N>,
 }
@@ -99,9 +95,9 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
             Ok(data) => {
                 info!("Uploading {} bytes to cloud...", data.len());
                 let request = self.module.request().await?;
-                request.set_header("X-Token", SOLAR_BACKEND_TOKEN).await?;
+                request.set_header("X-Token", crate::config::SOLAR_BACKEND_TOKEN).await?;
                 let mut response = request
-                    .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/reading"), data.as_slice())
+                    .post(concatcp!(crate::config::SOLAR_BACKEND_BASE_URL, "/api/v2/solar/reading"), data.as_slice())
                     .await?;
                 if response.status().is_ok() {
                     info!("Upload successful");
@@ -156,9 +152,9 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
         let mut encoder = PbEncoder::new(&mut buffer);
         event.encode(&mut encoder).map_err(|_| CellularError::Encoding())?;
         let request = self.module.request().await?;
-        request.set_header("X-Token", SOLAR_BACKEND_TOKEN).await?;
+        request.set_header("X-Token", crate::config::SOLAR_BACKEND_TOKEN).await?;
         let mut response = request
-            .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"), buffer.as_slice())
+            .post(concatcp!(crate::config::SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"), buffer.as_slice())
             .await?;
         if response.status().is_ok() {
             info!("Upload successful");
@@ -197,8 +193,8 @@ pub mod tests {
         event.encode(&mut encoder).unwrap();
         let client = reqwest::Client::new();
         let res = client
-            .post(concatcp!(SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"))
-            .header("X-TOKEN", SOLAR_BACKEND_TOKEN)
+            .post(concatcp!(crate::config::SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"))
+            .header("X-TOKEN", crate::config::SOLAR_BACKEND_TOKEN)
             .body(body_data)
             .send()
             .await
