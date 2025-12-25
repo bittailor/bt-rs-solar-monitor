@@ -21,6 +21,7 @@ bind_interrupts!(struct Irqs {
 async fn main(_spawner: Spawner) {
     let p = embassy_nrf::init(Default::default());
     let mut led = Output::new(p.P1_12, Level::Low, OutputDrive::Standard);
+    let green = Output::new(p.P0_14, Level::High, OutputDrive::Standard);
 
     let mut uart_ve_config = uarte::Config::default();
     uart_ve_config.parity = uarte::Parity::EXCLUDED;
@@ -41,7 +42,7 @@ async fn main(_spawner: Spawner) {
         &mut uart_ve_tx_buffer,
     );
     let mut ve_state = bt_core::sensor::ve_direct::State::<8>::default();
-    let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, embassy_time::Duration::from_secs(10));
+    let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, embassy_time::Duration::from_secs(10), green);
 
     let blinky = async {
         loop {

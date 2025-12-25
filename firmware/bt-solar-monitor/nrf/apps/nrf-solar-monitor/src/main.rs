@@ -29,6 +29,7 @@ async fn main(_spawner: Spawner) {
     info!("Using averaging duration: {}", CONFIG_SOLAR_SENSOR_AVERAGING_DURATION.as_secs());
 
     let mut led = Output::new(p.P1_12, Level::Low, OutputDrive::Standard);
+    let green = Output::new(p.P0_14, Level::Low, OutputDrive::Standard);
     let reset = Output::new(p.P0_03, Level::Low, OutputDrive::Standard);
     let pwrkey = Output::new(p.P0_04, Level::Low, OutputDrive::Standard);
 
@@ -74,7 +75,7 @@ async fn main(_spawner: Spawner) {
         &mut uart_ve_tx_buffer,
     );
     let mut ve_state = bt_core::sensor::ve_direct::State::<8>::new();
-    let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, CONFIG_SOLAR_SENSOR_AVERAGING_DURATION);
+    let (ve_direct_runner, ve_rx) = bt_core::sensor::ve_direct::new(&mut ve_state, uart_ve, CONFIG_SOLAR_SENSOR_AVERAGING_DURATION, green);
     let upload_channel = embassy_sync::channel::Channel::<embassy_sync::blocking_mutex::raw::NoopRawMutex, _, 4>::new();
     let solar_runner = bt_core::solar_monitor::upload::new(ve_rx, upload_channel.sender());
     let cloud_runner = bt_core::solar_monitor::cloud::new(module, upload_channel.receiver());

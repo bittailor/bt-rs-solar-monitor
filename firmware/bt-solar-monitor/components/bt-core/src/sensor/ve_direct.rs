@@ -2,7 +2,8 @@ use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
     channel::{Channel, Receiver, Sender},
 };
-use embassy_time::Instant;
+use embassy_time::{Instant, Timer};
+use embedded_hal::digital::OutputPin;
 use embedded_io_async::{Read, Write};
 use heapless::{LinearMap, String};
 
@@ -54,14 +55,15 @@ pub struct Reading {
     pub load_current: f32,    // IL
 }
 
-pub struct Runner<'a, Stream: Read + Write, const N: usize> {
+pub struct Runner<'a, Stream: Read + Write, Output: OutputPin, const N: usize> {
     frame_handler: FrameHandler<Stream>,
     averaging: Averaging,
     average_interval: embassy_time::Duration,
     rx: Sender<'a, NoopRawMutex, Reading, N>,
+    indicator_pin: Output,
 }
 
-impl<Stream: Read + Write, const N: usize> Runner<'_, Stream, N> {
+impl<Stream: Read + Write, Output: OutputPin, const N: usize> Runner<'_, Stream, Output, N> {
     pub async fn run(mut self) {
         loop {
             self.averaging_once().await;
@@ -72,7 +74,10 @@ impl<Stream: Read + Write, const N: usize> Runner<'_, Stream, N> {
         let end = Instant::now() + self.average_interval;
         loop {
             let reading = self.frame_handler.read_next().await;
+            _ = self.indicator_pin.set_low();
             self.averaging.add_reading(&reading);
+            Timer::after_millis(1).await;
+            _ = self.indicator_pin.set_high();
             if Instant::now() >= end {
                 if let Some((average, count)) = self.averaging.average() {
                     debug!("VE.Average> Over {} => {:?}", count, average);
@@ -103,17 +108,19 @@ impl<const N: usize> Default for State<N> {
     }
 }
 
-pub fn new<'a, Stream: Read + Write, const N: usize>(
+pub fn new<'a, Stream: Read + Write, Output: OutputPin, const N: usize>(
     state: &'a mut State<N>,
     stream: Stream,
     average_interval: embassy_time::Duration,
-) -> (Runner<'a, Stream, N>, Receiver<'a, NoopRawMutex, Reading, N>) {
+    indicator_pin: Output,
+) -> (Runner<'a, Stream, Output, N>, Receiver<'a, NoopRawMutex, Reading, N>) {
     (
         Runner {
             frame_handler: FrameHandler::new(stream),
             averaging: Averaging::default(),
             average_interval,
             rx: state.channel.sender(),
+            indicator_pin,
         },
         state.channel.receiver(),
     )
@@ -175,7 +182,7 @@ impl<Stream: Read> FrameHandler<Stream> {
                         }
                         _ => {}
                     });
-                    trace!("VE.Reading> {:?}", reading);
+                    debug!("VE.Reading> Ok");
                     return reading;
                 }
                 Err(_) => {

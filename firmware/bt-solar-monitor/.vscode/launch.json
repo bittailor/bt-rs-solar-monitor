@@ -21,6 +21,23 @@
             ],
             "consoleLogLevel": "Info", //Error, Warn, Info, Debug, Trace
             "wireProtocol": "Swd"
-        }
+        },
+        {
+            "type": "probe-rs-debug",
+            "request": "attach",
+            "name": "probe_rs attach",
+            "cwd": "${workspaceFolder}",
+            "chip": "nRF52840_xxAA",
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "${workspaceFolder}/nrf/target/thumbv7em-none-eabihf/release/nrf-solar-monitor",
+                    "svdFile": "${workspaceFolder}/nrf/hw/nrf52840.svd",
+                    "rttEnabled": true,
+                }
+            ],
+            "consoleLogLevel": "Info", //Error, Warn, Info, Debug, Trace
+            "wireProtocol": "Swd"
+        },
     ]
 }
