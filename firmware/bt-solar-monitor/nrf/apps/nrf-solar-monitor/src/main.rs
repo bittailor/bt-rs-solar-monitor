@@ -25,13 +25,13 @@ bind_interrupts!(struct Irqs {
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
     let p = embassy_nrf::init(Default::default());
-
+    info!("nRF Solar Monitor starting up...");
     info!("Using backend URL: {}", bt_core::config::SOLAR_BACKEND_BASE_URL);
     info!("Using averaging duration: {}", CONFIG_SOLAR_SENSOR_AVERAGING_DURATION.as_secs());
 
     let mut led = Output::new(p.P1_12, Level::Low, OutputDrive::Standard);
 
-    let mut red = Output::new(p.P0_13, Level::Low, OutputDrive::Standard);
+    let mut red = Output::new(p.P0_13, Level::High, OutputDrive::Standard);
     let green = Output::new(p.P0_14, Level::High, OutputDrive::Standard);
     let mut blue = Output::new(p.P0_15, Level::Low, OutputDrive::Standard);
 
@@ -80,22 +80,24 @@ async fn main(_spawner: Spawner) {
         Ok(x) => x,
         Err(_) => {
             info!("Watchdog already active with wrong config, waiting for it to timeout...");
+            red.set_low();
             loop {
                 Timer::after_millis(250).await;
             }
         }
     };
 
-    red.set_high();
+    Timer::after_millis(100).await;
+    info!("nRF Solar Monitor starting up...");
     blue.set_high();
 
     let blinky = async {
         loop {
             watchdog_handle.pet();
             led.set_high();
-            Timer::after_millis(500).await;
+            Timer::after_millis(100).await;
             led.set_low();
-            Timer::after_millis(500).await;
+            Timer::after_millis(900).await;
         }
     };
 
