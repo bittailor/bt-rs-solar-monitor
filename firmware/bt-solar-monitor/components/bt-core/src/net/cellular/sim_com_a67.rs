@@ -2,7 +2,7 @@ use core::str::{self};
 
 use chrono::NaiveDateTime;
 use embassy_futures::yield_now;
-use embassy_time::{Duration, Timer, WithTimeout};
+use embassy_time::{Duration, Timer, WithTimeout, with_timeout};
 use embedded_hal::digital::OutputPin;
 use embedded_io_async::Read;
 
@@ -121,17 +121,21 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
     }
 
     pub async fn wake_up(&self) -> Result<(), CellularError> {
-        self.is_alive().await;
-        while !self.is_alive().await {
-            warn!("LTE module not alive, retrying...");
-            yield_now().await;
-        }
-        while self.read_network_registration().await?.1 != crate::at::network::NetworkRegistrationState::Registered {
-            warn!("Not registered to network yet, waiting...");
-            Timer::after_secs(2).await;
-            info!("... retrying ...");
-        }
-        Ok(())
+        with_timeout(Duration::from_secs(30), async {
+            self.is_alive().await;
+            while !self.is_alive().await {
+                warn!("LTE module not alive, retrying...");
+                Timer::after_millis(5).await;
+                yield_now().await;
+            }
+            while self.read_network_registration().await?.1 != crate::at::network::NetworkRegistrationState::Registered {
+                warn!("Not registered to network yet, waiting...");
+                Timer::after_secs(2).await;
+                info!("... retrying ...");
+            }
+            Ok(())
+        })
+        .await?
     }
 
     pub async fn query_signal_quality(&self) -> Result<Rssi, CellularError> {

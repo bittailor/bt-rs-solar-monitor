@@ -37,7 +37,9 @@ clean_components:
 
 [working-directory: 'nrf']
 build_nrf:
-    cargo build --release 
+    cargo build --release
+    mkdir -p target/ota 
+    cargo objcopy --release --bin nrf-solar-monitor -- -O binary target/ota/bt-solar-monitor.bin
 
 [working-directory: 'nrf']
 clippy_nrf:

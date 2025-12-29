@@ -80,10 +80,12 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
         UtcTime::time_sync(now).await;
         self.state = CloudClientState::Connected;
         info!("CloudClient connected at {}", crate::fmt::FormatableNaiveDateTime(&now));
+        let rssi = self.module.query_signal_quality().await?;
         self.upload_event(SystemEvent {
             timestamp: now.and_utc().timestamp(),
             event: Some(Event::StartupEvent(StartupEvent {
                 uptime_seconds: Instant::now().as_secs() as u32,
+                rssi: rssi.into(),
             })),
         })
         .await?;
@@ -114,10 +116,12 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
             }
             Err(_) => {
                 if let Some(now) = UtcTime::now().await {
+                    let rssi = self.module.query_signal_quality().await?;
                     self.upload_event(SystemEvent {
                         timestamp: now.and_utc().timestamp(),
                         event: Some(Event::OfflineEvent(OfflineEvent {
                             uptime_seconds: Instant::now().as_secs() as u32,
+                            rssi: rssi.into(),
                         })),
                     })
                     .await?;
@@ -134,10 +138,12 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
         self.upload_receiver.ready_to_receive().await;
         self.module.wake_up().await?;
         if let Some(now) = UtcTime::now().await {
+            let rssi = self.module.query_signal_quality().await?;
             self.upload_event(SystemEvent {
                 timestamp: now.and_utc().timestamp(),
                 event: Some(Event::OnlineEvent(OnlineEvent {
                     uptime_seconds: Instant::now().as_secs() as u32,
+                    rssi: rssi.into(),
                 })),
             })
             .await?;
@@ -157,9 +163,9 @@ impl<'ch, 'a, Output: OutputPin, Ctr: AtController, M: RawMutex, const B: usize,
             .post(concatcp!(crate::config::SOLAR_BACKEND_BASE_URL, "/api/v2/solar/event"), buffer.as_slice())
             .await?;
         if response.status().is_ok() {
-            info!("Upload successful");
+            info!("Event sent successful");
         } else {
-            warn!("Upload failed with status {}", response.status());
+            warn!("Event send failed with status {}", response.status());
         }
         let body = response.body();
         if body.is_empty() {
@@ -187,7 +193,10 @@ pub mod tests {
         let startup = NaiveDateTime::parse_from_str("2025-11-30 12:30:00", "%Y-%m-%d %H:%M:%S").unwrap();
         let mut event = SystemEvent::default();
         event.timestamp = startup.and_utc().timestamp();
-        event.event = Some(Event::StartupEvent(StartupEvent { uptime_seconds: 123 }));
+        event.event = Some(Event::StartupEvent(StartupEvent {
+            uptime_seconds: 123,
+            rssi: -65,
+        }));
         let mut body_data = std::vec::Vec::default();
         let mut encoder = PbEncoder::new(&mut body_data);
         event.encode(&mut encoder).unwrap();

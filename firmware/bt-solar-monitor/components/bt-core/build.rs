@@ -8,6 +8,7 @@ fn main() {
     generator
         .compile_protos(&["proto/readings.proto"], std::env::var("OUT_DIR").unwrap() + "/generated_proto.rs")
         .unwrap();
+    println!("cargo:rerun-if-changed=proto");
 
     println!("cargo:rerun-if-env-changed=SOLAR_BACKEND_BASE_URL");
     println!("cargo:rerun-if-env-changed=SOLAR_BACKEND_TOKEN");

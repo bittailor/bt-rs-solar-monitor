@@ -182,7 +182,7 @@ impl<Stream: Read> FrameHandler<Stream> {
                         }
                         _ => {}
                     });
-                    debug!("VE.Reading> Ok");
+                    trace!("VE.Reading> Ok");
                     return reading;
                 }
                 Err(_) => {

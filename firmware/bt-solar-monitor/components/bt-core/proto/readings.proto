@@ -31,12 +31,15 @@ message SystemEvent {
 
 message StartupEvent {
     uint32 uptime_seconds = 2;
+    int32 rssi = 3;
 }
 
 message OnlineEvent {
     uint32 uptime_seconds = 2;
+    int32 rssi = 3;
 }
 
 message OfflineEvent {
     uint32 uptime_seconds = 2;
+    int32 rssi = 3;
 }
