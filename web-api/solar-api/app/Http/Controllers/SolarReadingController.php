@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use Carbon\Carbon;
 use Bt\Solar\Upload;
+use App\Models\Event;
 use DateTimeImmutable;
 use Bt\Solar\SystemEvent;
 use App\Models\SolarReading;
-use App\Models\Event;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -22,7 +23,7 @@ class SolarReadingController extends Controller
         $startTimestamp = $upload->getStartTimestamp();
         foreach ($upload->getEntries() as $entry) {
             $reading = $entry->getReading();
-            $timestamp = (new DateTimeImmutable())->setTimestamp($startTimestamp + $entry->getOffsetInSeconds());
+            $timestamp = Carbon::createFromTimestampUTC($startTimestamp + $entry->getOffsetInSeconds());
             $solarReading = new SolarReading;
             $factor = 1000.0;
             $solarReading->battery_voltage = $reading->getBatteryVoltage() / $factor;
@@ -42,10 +43,10 @@ class SolarReadingController extends Controller
         $event = new SystemEvent();
         $event->mergeFromString($content);
         $json = $event->serializeToJsonString();
-        Log::info("Event received ", ['event' => $json]);
+        Log::info("SystemEvent received ", ['event' => $json]);
         $dbEvent = new Event;
-        $dbEvent->timestamp = (new DateTimeImmutable())->setTimestamp($event->getTimestamp());
-        $dbEvent->event = $json;
+        $dbEvent->timestamp = Carbon::createFromTimestampUTC($event->getTimestamp());
+        $dbEvent->event = $event;
         $dbEvent->save();
         return response('', 200)->withHeaders([]); 
     }

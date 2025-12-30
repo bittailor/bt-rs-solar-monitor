@@ -11,6 +11,7 @@ task :publish do
         '.env.staging',
         'tmp',
         'Rakefile',
+        'storage/logs',
     ]
 
     exclude_args = excludes.map { |e| "--exclude='#{e}'" }.join(' ')
@@ -23,3 +24,14 @@ task :generate do
     sh "rm -rf ./generated && mkdir -p ./generated/"
     sh "protoc --proto_path=../../firmware/bt-solar-monitor/components/bt-core/proto --php_out=./generated/ ../../firmware/bt-solar-monitor/components/bt-core/proto/readings.proto" 
 end
+
+task :sync_db_to_local do
+    sh "ssh bockli@bockmattli.ch \"/home/bockli/db-dump-scrips/dump_bockli_solar-monitor_staging | gzip -c \" | gunzip > ./tmp/db_dump_solar-api_db.sql"
+    sh 'ls ./tmp'
+    sh 'mysql --host=db --user=solar-api-user --password=solar-api-pwd  solar-api < ./tmp/db_dump_solar-api_db.sql'
+    
+    sh "php artisan migrate"
+end
+
+
+# SWL

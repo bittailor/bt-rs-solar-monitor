@@ -189,8 +189,16 @@ pub mod tests {
     #[serial(bt_time)]
     #[tokio::test]
     #[ignore]
+    async fn check_configuration() {
+        info!("SOLAR_BACKEND_BASE_URL: {}", crate::config::SOLAR_BACKEND_BASE_URL);
+        info!("SOLAR_BACKEND_TOKEN: {}", crate::config::SOLAR_BACKEND_TOKEN);
+    }
+
+    #[serial(bt_time)]
+    #[tokio::test]
+    #[ignore]
     async fn check_startup_event() {
-        let startup = NaiveDateTime::parse_from_str("2025-11-30 12:30:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        let startup = NaiveDateTime::parse_from_str("2025-12-30 15:22:22", "%Y-%m-%d %H:%M:%S").unwrap();
         let mut event = SystemEvent::default();
         event.timestamp = startup.and_utc().timestamp();
         event.event = Some(Event::StartupEvent(StartupEvent {

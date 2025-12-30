@@ -19,17 +19,19 @@ use App\Http\Middleware\ApiToken;
 |
 */
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
-});
+
+// Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
+//     return $request->user();
+// });
+
 
 Route::get('/v2/info', function (Request $request) {
-    return "solar api v2";
+    return response('solar api v2', 200)->header('Content-Type', 'text/plain');
 });
 
-Route::middleware([ApiToken::class])->group(function () {
-    Route::post('/v2/solar/reading', [SolarReadingController::class, 'reading'])->middleware([StripToMinimalHeaders::class]);
-    Route::post('/v2/solar/event', [SolarReadingController::class, 'event'])->middleware([StripToMinimalHeaders::class]);
+Route::middleware([ApiToken::class])->prefix('/v2/solar')->group(function () {
+    Route::post('/reading', [SolarReadingController::class, 'reading'])->middleware([StripToMinimalHeaders::class]);
+    Route::post('/event', [SolarReadingController::class, 'event'])->middleware([StripToMinimalHeaders::class]);
 });
 
 
