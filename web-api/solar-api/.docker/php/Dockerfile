@@ -1,4 +1,4 @@
-FROM php:8.1-apache-bookworm
+FROM php:8.4-apache-trixie
 
 RUN mv "$PHP_INI_DIR/php.ini-development" "$PHP_INI_DIR/php.ini"
 

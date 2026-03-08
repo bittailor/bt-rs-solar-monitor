@@ -1,3 +1,3 @@
-<div>Online</div>
-<div>{{ $event->getRssi() }}</div>
-<div>{{ $event->getUptimeSeconds() }}</div>
+<div class="event-list-type-col">Online</div>
+<div class="event-list-type-rssi">{{ $event->getRssi() }}</div>
+<div class="event-list-type-uptime">{{ $event->getUptimeSeconds() }}</div>

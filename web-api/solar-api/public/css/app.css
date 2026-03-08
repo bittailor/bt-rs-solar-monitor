@@ -1,0 +1,32 @@
+.events-list-container {
+    display: flex; 
+    gap: 4px; 
+    font-size: small; 
+    align-items: baseline;
+    border-bottom: 1px solid #ccc;
+}
+
+.event-list-diff-col {
+    width: 40px;
+    text-align: right;
+}
+
+.event-list-type-col {
+    width: 60px;
+    font-weight: bold;
+}
+
+.event-list-type-rssi {
+    width: 40px;
+    text-align: right;
+}
+
+.event-list-type-uptime {
+    width: 80px;
+    text-align: right;
+}
+
+.event-list-diff-ts {
+    flex-grow: 1;
+    font-size: x-small;
+}

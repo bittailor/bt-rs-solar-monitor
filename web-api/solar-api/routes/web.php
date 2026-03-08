@@ -28,3 +28,4 @@ Route::get('/info', function () {
 
 
 Route::get('/events', [DashboardController::class, 'events']);
+Route::get('/readings', [DashboardController::class, 'readings']);
