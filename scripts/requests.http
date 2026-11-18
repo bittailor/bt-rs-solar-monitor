@@ -18,8 +18,10 @@ content-type: application/json
 
 ###
 
-###
-
 GET http://testserver.host/get HTTP/1.1
 Host: testserver.host
 
+###
+
+GET http://testserver.host/ip HTTP/1.1
+Host: testserver.host

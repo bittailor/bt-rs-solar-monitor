@@ -133,6 +133,18 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::SimComCellu
         let rtc = lte.query_real_time_clock().await?;
         info!("real time clock: {}", defmt::Display2Format(&rtc));
 
+        let mut buf = [0u8; 1024];
+
+        let response = lte
+            .request()
+            .await?
+            .get("http://testserver.host/ip")
+            .await?
+            .body()
+            .read_as_str(&mut buf)
+            .await?;
+        info!("http get response => '{}'", response);
+
         Timer::after_secs(10).await;
 
         info!("Set sleep mode");
