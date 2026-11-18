@@ -180,12 +180,7 @@ pub mod tests {
             .await
             .unwrap();
         */
-        let res = client
-            .post("http://api.solar.bockmattli.ch/api/v2/solar/reading")
-            .body(body_data)
-            .send()
-            .await
-            .unwrap();
+        let res = client.post("http://localhost:8000/api/v2/solar/reading").body(body_data).send().await.unwrap();
         let success = res.status().is_success();
         let text = res.text().await.unwrap();
         if !success {

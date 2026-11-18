@@ -93,6 +93,17 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::SimComCellu
     let response = lte
         .request()
         .await?
+        .get("http://testserver.host/ip")
+        .await?
+        .body()
+        .read_as_str(&mut buf)
+        .await?;
+    info!("http get response => '{}'", response);
+
+    /*
+    let response = lte
+        .request()
+        .await?
         .set_header("x-access-token", "1234")
         .await?
         .set_header("bt-token", "hdsjhidqdveu672676")
@@ -113,6 +124,7 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::SimComCellu
         .read_as_str(&mut buf)
         .await?;
     info!("http post response: '{}'", response);
+    */
 
     loop {
         let rssi = lte.query_signal_quality().await?;
