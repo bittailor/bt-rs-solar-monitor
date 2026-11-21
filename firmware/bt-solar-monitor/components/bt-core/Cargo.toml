@@ -46,7 +46,7 @@ const_format = "0.2.35"
 
 [target.'cfg(not(target_os = "none"))'.dependencies]
 critical-section = { version = "1.2.0", features = ["std"] }
-embassy-time = { version = "0.5.0", features = ["std"] }
+embassy-time = { version = "0.5.0", features = ["std", "generic-queue-8"] }
 
 [dev-dependencies]
 defmt-rtt = "1.0.0"

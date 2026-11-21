@@ -7,6 +7,12 @@ edition = "2024"
 defmt = ["dep:defmt", "dep:defmt-rtt", "dep:panic-probe", "ekv/defmt"]
 log = ["dep:log"]
 default = ["defmt"]
+lte-mqtt = []
+
+[[bin]]
+name = "lte-mqtt"
+path = "src/bin/lte-mqtt.rs"
+required-features = ["lte-mqtt"]
 
 [dependencies]
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }

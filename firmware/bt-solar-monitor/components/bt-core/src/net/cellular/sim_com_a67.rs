@@ -11,11 +11,23 @@ use crate::{
     net::cellular::CellularError,
 };
 
+pub use crate::at::mqtt::{MqttConfig, MqttMessage, MqttQos, MqttTlsConfig};
+use crate::at::{AtError, mqtt};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MqttState {
+    Stopped,
+    Started,
+    Acquired,
+    Connected,
+}
+
 pub struct SimComCellularModule<'ch, Output: OutputPin, Ctr: AtController> {
     at_client: crate::at::AtClientImpl<'ch, Ctr>,
     pwrkey: Output,
     reset: Output,
     http_initialized: bool,
+    mqtt_state: MqttState,
 }
 
 impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output, Ctr> {
@@ -25,6 +37,7 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
             pwrkey,
             reset,
             http_initialized: false,
+            mqtt_state: MqttState::Stopped,
         }
     }
 
@@ -43,12 +56,14 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
 
     pub async fn power_on(&mut self) -> Result<(), CellularError> {
         self.http_initialized = false;
+        self.mqtt_state = MqttState::Stopped;
         info!("power on ...");
         self.pwrkey.set_low().map_err(|_| CellularError::GpioError {})?;
         Timer::after_millis(50).await;
         self.pwrkey.set_high().map_err(|_| CellularError::GpioError {})?;
         info!("... wait 8s to startup ...");
         Timer::after_secs(8).await;
+        self.at_client.use_controller(async |ctr| ctr.clear_mqtt()).await;
         info!("... check AT ...");
         self.ensure_at(Duration::from_secs(10)).await?;
         info!("... power on done");
@@ -68,8 +83,10 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
         Ok(())
     }
 
-    pub async fn power_down(&self) -> Result<(), CellularError> {
+    pub async fn power_down(&mut self) -> Result<(), CellularError> {
         crate::at::status_control::power_down(&self.at_client).await?;
+        self.http_initialized = false;
+        self.mqtt_state = MqttState::Stopped;
         Timer::after_secs(2).await; // Power off time
         Timer::after_secs(2).await; // Power off - power on buffer time
         Ok(())
@@ -80,8 +97,11 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
         self.reset.set_low().map_err(|_| CellularError::GpioError {})?;
         Timer::after_millis(2500).await;
         self.reset.set_high().map_err(|_| CellularError::GpioError {})?;
+        self.http_initialized = false;
+        self.mqtt_state = MqttState::Stopped;
         info!("... wait a bit for module to start ...");
         Timer::after_millis(5000).await;
+        self.at_client.use_controller(async |ctr| ctr.clear_mqtt()).await;
         info!("... reset done");
         Ok(())
     }
@@ -113,6 +133,10 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
     }
 
     pub async fn set_sleep_mode(&mut self, mode: SleepMode) -> Result<(), CellularError> {
+        if mode != SleepMode::Off && self.mqtt_state != MqttState::Stopped {
+            error!("Disconnect MQTT before entering sleep mode");
+            return Err(AtError::InvalidState.into());
+        }
         if self.http_initialized {
             crate::at::http::term(&self.at_client).await?;
             self.http_initialized = false;
@@ -151,6 +175,83 @@ impl<'ch, Output: OutputPin, Ctr: AtController> SimComCellularModule<'ch, Output
             self.http_initialized = true;
         }
         HttpRequest::new(&self.at_client).await
+    }
+
+    /// Upload a trust anchor before connecting. No certificate bytes are logged.
+    pub async fn mqtt_upload_ca(&mut self, filename: &str, certificate: &[u8]) -> Result<(), CellularError> {
+        self.ensure_mqtt_state(MqttState::Stopped)?;
+        // Disable echo before uploading raw certificate data.
+        crate::at::mqtt::disable_echo(&self.at_client).await?;
+        mqtt::upload_ca(&self.at_client, filename, certificate).await?;
+        Ok(())
+    }
+
+    /// Start service, acquire client 0 and connect. On error call mqtt_disconnect
+    /// to clean up the successfully completed stages before retrying.
+    pub async fn mqtt_connect(&mut self, config: &MqttConfig<'_>) -> Result<(), CellularError> {
+        self.ensure_mqtt_state(MqttState::Stopped)?;
+        mqtt::validate(config)?;
+        mqtt::start(&self.at_client).await?;
+        self.mqtt_state = MqttState::Started;
+        mqtt::acquire(&self.at_client, config).await?;
+        self.mqtt_state = MqttState::Acquired;
+        mqtt::connect(&self.at_client, config).await?;
+        self.mqtt_state = MqttState::Connected;
+        Ok(())
+    }
+
+    pub async fn mqtt_publish(&mut self, topic: &str, payload: &[u8], qos: MqttQos, retain: bool) -> Result<(), CellularError> {
+        self.ensure_mqtt_state(MqttState::Connected)?;
+        mqtt::publish(&self.at_client, topic, payload, qos, retain).await?;
+        Ok(())
+    }
+
+    pub async fn mqtt_subscribe(&mut self, filter: &str, qos: MqttQos) -> Result<(), CellularError> {
+        self.ensure_mqtt_state(MqttState::Connected)?;
+        mqtt::subscribe(&self.at_client, filter, qos).await?;
+        Ok(())
+    }
+
+    pub async fn mqtt_unsubscribe(&mut self, filter: &str) -> Result<(), CellularError> {
+        self.ensure_mqtt_state(MqttState::Connected)?;
+        mqtt::unsubscribe(&self.at_client, filter).await?;
+        Ok(())
+    }
+
+    /// Receive a complete message, including any queued during another command.
+    /// Do not externally cancel AT operations; use this internal timeout instead.
+    pub async fn mqtt_receive(&mut self, timeout: Duration) -> Result<MqttMessage, CellularError> {
+        self.ensure_mqtt_state(MqttState::Connected)?;
+        let result = self.at_client.use_controller(async |ctr| ctr.handle_mqtt_receive(timeout).await).await;
+        if matches!(result, Err(AtError::MqttConnectionLost(_))) {
+            self.mqtt_state = MqttState::Acquired;
+        }
+        result.map_err(Into::into)
+    }
+
+    /// Explicit asynchronous cleanup is required; dropping the module cannot send AT commands.
+    pub async fn mqtt_disconnect(&mut self) -> Result<(), CellularError> {
+        if self.mqtt_state == MqttState::Connected {
+            mqtt::disconnect(&self.at_client).await?;
+            self.mqtt_state = MqttState::Acquired;
+        }
+        if self.mqtt_state == MqttState::Acquired {
+            mqtt::release(&self.at_client).await?;
+            self.mqtt_state = MqttState::Started;
+        }
+        if self.mqtt_state == MqttState::Started {
+            mqtt::stop(&self.at_client).await?;
+            self.mqtt_state = MqttState::Stopped;
+        }
+        Ok(())
+    }
+
+    fn ensure_mqtt_state(&self, expected: MqttState) -> Result<(), CellularError> {
+        if self.mqtt_state != expected {
+            error!("MQTT operation is invalid in current state");
+            return Err(AtError::InvalidState.into());
+        }
+        Ok(())
     }
 }
 

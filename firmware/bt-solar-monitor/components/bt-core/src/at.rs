@@ -1,6 +1,7 @@
 #![allow(async_fn_in_trait)]
 
 pub mod http;
+pub mod mqtt;
 pub mod network;
 pub mod packet_domain;
 pub mod serial_interface;
@@ -34,6 +35,10 @@ pub enum AtError {
     EnumParseError(String<ERROR_STRING_SIZE>),
     ResponseLineCountMismatch { expected: usize, actual: usize },
     Error,
+    InvalidParameter,
+    InvalidState,
+    Mqtt(u16),
+    MqttConnectionLost(u16),
 }
 
 impl From<core::fmt::Error> for AtError {
@@ -56,12 +61,30 @@ impl From<CapacityError> for AtError {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+#[derive(Eq, PartialEq)]
 pub struct AtCommandRequest {
     command: String<AT_BUFFER_SIZE>,
     timeout: Duration,
     urc_prefix: Option<String<AT_BUFFER_SIZE>>,
+    sensitive: bool,
+}
+
+impl core::fmt::Debug for AtCommandRequest {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("AtCommandRequest")
+            .field("command", &if self.sensitive { "<redacted>" } else { self.command.as_str() })
+            .field("timeout", &self.timeout)
+            .field("urc_prefix", &self.urc_prefix)
+            .finish()
+    }
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for AtCommandRequest {
+    fn format(&self, f: defmt::Formatter) {
+        let command = if self.sensitive { "<redacted>" } else { self.command.as_str() };
+        defmt::write!(f, "AtCommandRequest {{ command: {}, timeout: {:?}, urc_prefix: {:?} }}", command, self.timeout, self.urc_prefix);
+    }
 }
 
 impl AtCommandRequest {
@@ -70,11 +93,17 @@ impl AtCommandRequest {
             command,
             timeout: Duration::from_secs(5),
             urc_prefix: None,
+            sensitive: false,
         }
     }
 
     fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    fn sensitive(mut self) -> Self {
+        self.sensitive = true;
         self
     }
 
@@ -84,7 +113,9 @@ impl AtCommandRequest {
     }
 
     async fn send<'ch, Ctr: AtController>(self, client: &impl AtClient<'ch, Ctr>) -> Result<AtCommandResponse, AtError> {
-        debug!("AT.Req> {:?}", self);
+        if !self.sensitive {
+            debug!("AT.Req> {}", self.command);
+        }
         let response = client.use_controller(async |ctr| ctr.handle_command(&self).await).await;
         debug!("AT.Rsp> {:?}", response);
         response
@@ -259,7 +290,9 @@ impl<'ch, Ctr: AtController> Runner<'ch, Ctr> {
     }
 
     async fn handle_urc(&mut self, urc: String<AT_BUFFER_SIZE>) {
-        info!("Handling URC: {}", urc.as_str());
+        if !urc.is_empty() {
+            info!("Handling URC: {}", urc.as_str());
+        }
     }
 }
 
@@ -323,33 +356,86 @@ pub trait AtController {
     async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError>;
     async fn handle_http_read(&mut self, buf: &mut [u8], offset: usize) -> Result<(), AtError>;
     async fn handle_http_write(&mut self, buf: &[u8]) -> Result<(), AtError>;
+    async fn handle_data_command(&mut self, cmd: &AtCommandRequest, data: &[u8]) -> Result<(), AtError>;
+    async fn handle_mqtt_receive(&mut self, timeout: Duration) -> Result<mqtt::MqttMessage, AtError>;
+    fn clear_mqtt(&mut self);
     async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE>;
 }
 
 pub struct AtControllerImpl<S: Read + Write> {
     stream: S,
     line_buffer: heapless::Vec<u8, AT_BUFFER_SIZE>,
+    mqtt: mqtt::Receiver,
+    sensitive: bool,
 }
 
 impl<S: Read + Write> AtController for AtControllerImpl<S> {
     async fn handle_command(&mut self, cmd: &AtCommandRequest) -> Result<AtCommandResponse, AtError> {
-        if let Err(_e) = self.stream.write_all(cmd.command.as_bytes()).await {
-            error!("Failed to send command: {}", cmd.command);
-            return Err(AtError::Error);
-        }
-        if let Err(_e) = self.stream.write_all(b"\r\n").await {
-            error!("Failed to send command: {}", cmd.command);
-            return Err(AtError::Error);
-        }
-        info!("UART.TX> {}", cmd.command);
-        let mut response = AtCommandResponse::default();
-        self.read_response_lines(cmd.command.as_str(), cmd.timeout, &mut response.lines).await?;
+        self.sensitive = cmd.sensitive;
+        let result = with_timeout(cmd.timeout, async {
+            self.stream.write_all(cmd.command.as_bytes()).await.map_err(|_| AtError::Error)?;
+            self.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
+            if !cmd.sensitive {
+                info!("UART.TX> {}", cmd.command);
+            }
+            let mut response = AtCommandResponse::default();
+            self.read_response_lines(cmd.command.as_str(), cmd.timeout, &mut response.lines).await?;
+            if let Some(prefix) = &cmd.urc_prefix {
+                // DISC may report its result before OK.
+                if !response.lines.iter().any(|line| line.starts_with(prefix.as_str())) {
+                    self.read_line_until_urc(prefix.as_str(), cmd.timeout, &mut response.lines).await?;
+                }
+            }
+            Ok(response)
+        })
+        .await
+        .map_err(|_| AtError::Timeout)
+        .and_then(core::convert::identity);
+        self.sensitive = false;
+        result
+    }
 
-        if let Some(prefix) = &cmd.urc_prefix {
-            self.read_line_until_urc(prefix.as_str(), cmd.timeout, &mut response.lines).await?;
-        }
-        debug!("'{}' => completed with {:?}", cmd.command, response);
-        Ok(response)
+    async fn handle_data_command(&mut self, cmd: &AtCommandRequest, data: &[u8]) -> Result<(), AtError> {
+        with_timeout(cmd.timeout, async {
+            self.stream.write_all(cmd.command.as_bytes()).await.map_err(|_| AtError::Error)?;
+            self.stream.write_all(b"\r\n").await.map_err(|_| AtError::Error)?;
+            loop {
+                let line = self.read_line_with_prompt(true).await?;
+                match line.trim() {
+                    ">" => break,
+                    "ERROR" => return Err(AtError::Error),
+                    line if line.starts_with("+CME ERROR:") || line.starts_with("+CMS ERROR:") => return Err(AtError::Error),
+                    _ => {}
+                }
+            }
+            // CCERTDOWN permits at most 3072 bytes per packet.
+            for chunk in data.chunks(3072) {
+                self.stream.write_all(chunk).await.map_err(|_| AtError::Error)?;
+            }
+            let mut lines = Vec::new();
+            self.read_response_lines("", cmd.timeout, &mut lines).await
+        })
+        .await
+        .map_err(|_| AtError::Timeout)?
+    }
+
+    async fn handle_mqtt_receive(&mut self, timeout: Duration) -> Result<mqtt::MqttMessage, AtError> {
+        // The timeout is inside use_controller so releasing the AT runner cannot be cancelled.
+        with_timeout(timeout, async {
+            loop {
+                if let Some(message) = self.mqtt.take() {
+                    return message;
+                }
+                let _ = self.read_line().await?;
+            }
+        })
+        .await
+        .map_err(|_| AtError::Timeout)?
+    }
+
+    fn clear_mqtt(&mut self) {
+        self.mqtt = mqtt::Receiver::new();
+        self.line_buffer.clear();
     }
 
     async fn handle_http_read(&mut self, buf: &mut [u8], offset: usize) -> Result<(), AtError> {
@@ -382,6 +468,8 @@ impl<S: Read + Write> AtControllerImpl<S> {
         Self {
             stream,
             line_buffer: heapless::Vec::new(),
+            mqtt: mqtt::Receiver::new(),
+            sensitive: false,
         }
     }
 
@@ -422,18 +510,20 @@ impl<S: Read + Write> AtControllerImpl<S> {
         match with_timeout(timeout, async {
             loop {
                 let line = self.read_line().await?;
-                if line == "OK" || line == "DOWNLOAD" {
+                if line.trim() == "OK" || line == "DOWNLOAD" {
                     debug!("{} => success => {} response lines", line, lines.len());
                     break Ok(());
-                } else if line == "ERROR" {
+                } else if line.trim() == "ERROR" || line.starts_with("+CME ERROR:") || line.starts_with("+CMS ERROR:") {
                     warn!("ERROR => error => {} response lines", lines.len());
                     break Err(AtError::Error);
                 } else {
-                    if line == command {
+                    if line.trim().is_empty() || line == command {
                         trace!("Skipping echo line");
                         continue;
                     }
-                    debug!(" R[{}] {}", lines.len(), line.as_str());
+                    if !self.sensitive {
+                        debug!(" R[{}] {}", lines.len(), line.as_str());
+                    }
                     lines.push(line).map_err(|_| AtError::CapacityError)?;
                 }
             }
@@ -441,15 +531,15 @@ impl<S: Read + Write> AtControllerImpl<S> {
         .await
         {
             Ok(Ok(l)) => {
-                debug!("'{}' => completed", command);
+                debug!("AT command completed");
                 Ok(l)
             }
             Ok(Err(e)) => {
-                error!("'{}' => error", command);
+                error!("AT command error");
                 Err(e)
             }
             Err(_e) => {
-                error!("'{}' => timeout", command);
+                error!("AT command timeout");
                 Err(AtError::Timeout)
             }
         }
@@ -464,6 +554,9 @@ impl<S: Read + Write> AtControllerImpl<S> {
         match with_timeout(timeout, async {
             loop {
                 let line = self.read_line().await?;
+                if line.is_empty() {
+                    continue;
+                }
                 let prefix_match = line.starts_with(prefix);
                 lines.push(line).map_err(|_| AtError::CapacityError)?;
                 if prefix_match {
@@ -490,11 +583,25 @@ impl<S: Read + Write> AtControllerImpl<S> {
     }
 
     async fn read_line(&mut self) -> Result<String<AT_BUFFER_SIZE>, AtError> {
+        self.read_line_with_prompt(false).await
+    }
+
+    async fn read_line_with_prompt(&mut self, prompt: bool) -> Result<String<AT_BUFFER_SIZE>, AtError> {
         let mut have_cr = false;
         loop {
             let mut char_buf = [0u8; 1];
             match self.stream.read(&mut char_buf).await {
+                Ok(0) => {
+                    error!("AT UART closed");
+                    return Err(AtError::Error);
+                }
                 Ok(_) => {
+                    if self.mqtt.byte(char_buf[0]) {
+                        continue;
+                    }
+                    if prompt && char_buf[0] == b'>' && self.line_buffer.is_empty() {
+                        return Ok(">".try_into()?);
+                    }
                     if char_buf[0] == b'\r' {
                         have_cr = true;
                         continue;
@@ -508,18 +615,28 @@ impl<S: Read + Write> AtControllerImpl<S> {
                         if !self.line_buffer.is_empty() {
                             match String::from_utf8(replace(&mut self.line_buffer, heapless::Vec::new())) {
                                 Ok(line) => {
-                                    debug!("UART.RX> {}", line.as_str());
+                                    if self.mqtt.line(line.as_str())? {
+                                        return Ok(String::new());
+                                    }
+                                    if !self.sensitive {
+                                        debug!("UART.RX> {}", line.as_str());
+                                    }
                                     return Ok(line);
                                 }
-                                Err(_) => error!("Invalid UTF-8 sequence"),
+                                Err(_) => {
+                                    error!("Invalid UTF-8 AT line");
+                                    return Err(AtError::FormatError);
+                                }
                             }
-                            self.line_buffer.clear();
                         }
                     } else {
                         self.line_buffer.push(char_buf[0]).map_err(|_| AtError::CapacityError)?;
                     }
                 }
-                Err(_e) => warn!("Read error"),
+                Err(_e) => {
+                    error!("AT UART read error");
+                    return Err(AtError::Error);
+                }
             };
         }
     }
@@ -552,6 +669,13 @@ pub mod mocks {
         async fn handle_http_write(&mut self, _buf: &[u8]) -> Result<(), AtError> {
             Err(AtError::Error)
         }
+        async fn handle_data_command(&mut self, _cmd: &AtCommandRequest, _data: &[u8]) -> Result<(), AtError> {
+            Err(AtError::Error)
+        }
+        async fn handle_mqtt_receive(&mut self, _timeout: Duration) -> Result<mqtt::MqttMessage, AtError> {
+            Err(AtError::Error)
+        }
+        fn clear_mqtt(&mut self) {}
         async fn poll_urc(&mut self) -> String<AT_BUFFER_SIZE> {
             String::new()
         }
