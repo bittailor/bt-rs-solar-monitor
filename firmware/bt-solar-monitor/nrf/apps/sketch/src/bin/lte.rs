@@ -145,6 +145,16 @@ async fn lte_sequence(lte: &mut bt_core::net::cellular::sim_com_a67::SimComCellu
             .await?;
         info!("http get response => '{}'", response);
 
+        let response = lte
+            .request()
+            .await?
+            .get("https://testserver.host/ip")
+            .await?
+            .body()
+            .read_as_str(&mut buf)
+            .await?;
+        info!("https get response => '{}'", response);
+
         Timer::after_secs(10).await;
 
         info!("Set sleep mode");
